@@ -1,0 +1,27 @@
+/target/
+/dist/
+/packaging/runtime-root/
+/packaging/php-builds/
+/packaging/ci-inputs/
+*.deb
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+# OS
+.DS_Store
+Thumbs.db
+# Logs / temp / env
+*.log
+*.tmp
+.env
+.env.*
+.envrc
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Python bytecode
+__pycache__/
