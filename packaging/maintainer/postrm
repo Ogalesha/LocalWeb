@@ -1,0 +1,36 @@
+#!/bin/sh
+set -e
+
+refresh_caches() {
+    if command -v update-desktop-database >/dev/null 2>&1; then
+        update-desktop-database /usr/share/applications 2>/dev/null || true
+    fi
+    if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+        gtk-update-icon-cache -f -t /usr/share/icons/hicolor 2>/dev/null || true
+    fi
+}
+
+case "${1:-}" in
+    remove|purge|disappear)
+        # User data is never removed automatically: package removal is not
+        # consent to destroy projects, databases, configurations or private
+        # CA keys. Use `localweb data purge` from each account instead.
+        rm -rf -- /var/lib/localweb /var/log/localweb /usr/lib/localweb
+
+        for runtime_dir in /run/user/[0-9]*; do
+            [ -d "$runtime_dir" ] || continue
+            uid=${runtime_dir##*/}
+            user=$(getent passwd "$uid" | cut -d: -f1)
+            [ -n "$user" ] || continue
+            [ -S "$runtime_dir/bus" ] || continue
+            runuser -u "$user" -- env \
+                XDG_RUNTIME_DIR="$runtime_dir" \
+                DBUS_SESSION_BUS_ADDRESS="unix:path=$runtime_dir/bus" \
+                systemctl --user daemon-reload 2>/dev/null || true
+        done
+
+        refresh_caches
+        ;;
+esac
+
+exit 0

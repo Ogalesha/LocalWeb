@@ -1,0 +1,84 @@
+#!/bin/sh
+set -e
+
+case "${1:-}" in
+    remove|deconfigure)
+        for runtime_dir in /run/user/[0-9]*; do
+            [ -d "$runtime_dir" ] || continue
+            uid=${runtime_dir##*/}
+            user=$(getent passwd "$uid" | cut -d: -f1)
+            [ -n "$user" ] || continue
+            [ -S "$runtime_dir/bus" ] || continue
+
+            units=$(runuser -u "$user" -- env \
+                XDG_RUNTIME_DIR="$runtime_dir" \
+                DBUS_SESSION_BUS_ADDRESS="unix:path=$runtime_dir/bus" \
+                systemctl --user list-units --all --type=service --plain --no-legend 'localweb-*' 2>/dev/null \
+                | awk '{print $1}')
+            if [ -n "$units" ]; then
+                runuser -u "$user" -- env \
+                    XDG_RUNTIME_DIR="$runtime_dir" \
+                    DBUS_SESSION_BUS_ADDRESS="unix:path=$runtime_dir/bus" \
+                    systemctl --user stop $units 2>/dev/null || true
+            fi
+            runuser -u "$user" -- env \
+                XDG_RUNTIME_DIR="$runtime_dir" \
+                DBUS_SESSION_BUS_ADDRESS="unix:path=$runtime_dir/bus" \
+                systemctl --user disable --now localwebd.service 2>/dev/null || true
+        done
+
+        for process in /proc/[0-9]*; do
+            [ -e "$process/exe" ] || continue
+            executable=$(readlink "$process/exe" 2>/dev/null || true)
+            case "$executable" in
+                /usr/lib/localweb/*)
+                    kill -TERM "${process##*/}" 2>/dev/null || true
+                    ;;
+            esac
+        done
+        sleep 1
+        for process in /proc/[0-9]*; do
+            [ -e "$process/exe" ] || continue
+            executable=$(readlink "$process/exe" 2>/dev/null || true)
+            case "$executable" in
+                /usr/lib/localweb/*)
+                    kill -KILL "${process##*/}" 2>/dev/null || true
+                    ;;
+            esac
+        done
+
+        if [ -x /usr/lib/localweb/localweb-helper ]; then
+            if ! DPKG_MAINTSCRIPT_PACKAGE=localweb DPKG_MAINTSCRIPT_NAME=prerm \
+                /usr/lib/localweb/localweb-helper package-remove; then
+                echo "warning: LocalWeb system integration cleanup was incomplete" >&2
+            fi
+        fi
+
+        if command -v setcap >/dev/null 2>&1 && [ -e /usr/lib/localweb/localweb-gateway ]; then
+            setcap -r /usr/lib/localweb/localweb-gateway 2>/dev/null || true
+        fi
+
+        if [ -x /usr/bin/certutil ]; then
+            for registry in /var/lib/localweb/users/*.paths; do
+                [ -f "$registry" ] || continue
+                uid=${registry##*/}
+                uid=${uid%.paths}
+                case "$uid" in
+                    *[!0-9]*|'') continue ;;
+                esac
+                user=$(getent passwd "$uid" | cut -d: -f1)
+                user_home=$(getent passwd "$uid" | cut -d: -f6)
+                [ -n "$user" ] || continue
+                for database in "$user_home/.pki/nssdb" "$user_home/.local/share/pki/nssdb"; do
+                    [ -f "$database/cert9.db" ] || continue
+                    runuser -u "$user" -- /usr/bin/certutil \
+                        -D -d "sql:$database" \
+                        -n "LocalWeb Development CA" 2>/dev/null || true
+                done
+            done
+        fi
+        ;;
+esac
+
+exit 0
+

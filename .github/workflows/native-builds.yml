@@ -1,0 +1,253 @@
+name: Native packages and acceptance
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+concurrency:
+  group: native-packages-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Ubuntu 26.04 amd64
+            image: ubuntu:26.04
+            artifact: ubuntu-amd64
+          - name: Arch Linux (Omarchy base) amd64
+            image: archlinux:base-devel
+            artifact: arch-omarchy-amd64
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - name: Prepare isolated CI build host
+        run: docker build --build-arg BASE_IMAGE=${{ matrix.image }} -f .github/ci/linux-builder.Dockerfile -t localweb-builder .
+      - name: Build, install and exercise the full native stack
+        run: |
+          trap 'python3 .github/ci/report-failure.py native-build.log' ERR
+          exec > >(tee native-build.log) 2>&1
+          docker run --name lw-ci --privileged --security-opt seccomp=unconfined --cgroupns=private --tmpfs /run --tmpfs /run/lock -d localweb-builder
+          for attempt in {1..60}; do docker exec lw-ci systemctl is-active dbus.service && break; sleep 1; done
+          docker exec lw-ci systemctl is-active dbus.service
+          docker exec lw-ci bash -ec 'cp /etc/hosts /tmp/lw-hosts; umount /etc/hosts; cp /tmp/lw-hosts /etc/hosts; loginctl enable-linger builder'
+          for attempt in {1..60}; do docker exec lw-ci test -S /run/user/1000/bus && break; sleep 1; done
+          docker exec lw-ci test -S /run/user/1000/bus
+          docker exec lw-ci runuser -u builder -- env XDG_RUNTIME_DIR=/run/user/1000 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus bash /workspace/scripts/ci-native-linux.sh
+          docker cp lw-ci:/workspace/dist ./dist
+      - uses: actions/upload-artifact@v7.0.2
+        with:
+          name: localweb-${{ matrix.artifact }}
+          path: dist/
+          if-no-files-found: error
+      - name: Collect native build diagnostics
+        if: always()
+        run: |
+          mkdir -p native-diagnostics
+          cp native-build.log native-diagnostics/ 2>/dev/null || true
+          docker cp lw-ci:/workspace/packaging/php-builds/logs native-diagnostics/php-build-logs 2>/dev/null || true
+          docker cp lw-ci:/workspace/packaging/runtime-root native-diagnostics/runtime-root 2>/dev/null || true
+      - uses: actions/upload-artifact@v7.0.2
+        if: always()
+        with:
+          name: localweb-native-diagnostics-${{ matrix.artifact }}
+          path: native-diagnostics/
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Stop isolated CI host
+        if: always()
+        run: docker logs lw-ci || true; docker rm -f lw-ci || true
+
+  windows-wine:
+    name: Windows binaries (Wine smoke)
+    runs-on: ubuntu-latest
+    container: ubuntu:26.04
+    timeout-minutes: 120
+    steps:
+      - name: Install Wine, LLVM tools and xvfb
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            wine64 clang lld llvm nasm xvfb python3 curl ca-certificates \
+            build-essential pkg-config libssl-dev git
+          llvm_bin=$(dirname "$(find /usr/lib -name llvm-lib -print -quit)")
+          ln -sf "$llvm_bin/llvm-lib" /usr/local/bin/llvm-lib
+          ln -sf "$llvm_bin/llvm-ar" /usr/local/bin/llvm-ar
+      - uses: actions/checkout@v7.0.1
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+      - name: Install cargo-xwin
+        shell: bash
+        run: |
+          trap 'python3 .github/ci/report-failure.py xwin-install.log' ERR
+          timeout --kill-after=30s 20m cargo install --locked cargo-xwin 2>&1 | tee xwin-install.log
+      - name: Cross-build and exercise the Windows binaries under Wine
+        shell: bash
+        run: |
+          trap 'python3 .github/ci/report-failure.py windows-wine.log' ERR
+          timeout --kill-after=30s 75m bash scripts/windows-wine-smoke.sh 2>&1 | tee windows-wine.log
+      - name: Package the Windows binaries
+        run: bash scripts/build-windows-zip.sh
+      - uses: actions/upload-artifact@v7.0.2
+        with:
+          name: localweb-windows-amd64
+          path: dist/*.zip
+          if-no-files-found: error
+
+  windows-native:
+    name: Windows native regressions
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Check native Windows code quality
+        run: cargo clippy --workspace --all-targets --color never --message-format=json -- -D warnings > "$env:RUNNER_TEMP/localweb-clippy.jsonl"
+      - name: Report native Rust diagnostics
+        if: always()
+        run: python .github/ci/report-rust-diagnostics.py "$env:RUNNER_TEMP/localweb-clippy.jsonl"
+      - name: Run Windows workspace regressions
+        id: windows-tests
+        if: ${{ !cancelled() }}
+        run: |
+          cargo test --workspace --all-targets --no-fail-fast 2>&1 | Tee-Object -FilePath "$env:RUNNER_TEMP/localweb-tests.log"
+          exit $LASTEXITCODE
+      - name: Verify Windows manual start and owned shutdown
+        timeout-minutes: 10
+        run: .github/ci/windows-lifecycle-test.ps1
+      - name: Verify current-user certificate trust
+        id: windows-cert-tests
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+        run: .github/ci/windows-certificate-test.ps1
+      - name: Verify shell integration ownership
+        if: ${{ !cancelled() }}
+        timeout-minutes: 10
+        run: .github/ci/windows-shell-integration-test.ps1
+      - name: Report failing tests
+        if: failure() && (steps.windows-tests.outcome == 'failure' || steps.windows-cert-tests.outcome == 'failure')
+        run: python .github/ci/report-failure.py "$env:RUNNER_TEMP/localweb-tests.log"
+
+  macos-package:
+    name: macOS installer (universal)
+    runs-on: macos-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+      - name: Check native macOS code quality
+        run: cargo clippy --workspace --all-targets --color never --message-format=json -- -D warnings > "$RUNNER_TEMP/localweb-clippy.jsonl"
+      - name: Report native Rust diagnostics
+        if: always()
+        run: python3 .github/ci/report-rust-diagnostics.py "$RUNNER_TEMP/localweb-clippy.jsonl"
+      - name: Run macOS workspace regressions
+        run: cargo test --workspace --all-targets
+      - name: Build universal release binaries
+        run: |
+          cargo build --release --workspace --target aarch64-apple-darwin
+          cargo build --release --workspace --target x86_64-apple-darwin
+          mkdir -p target/universal/release
+          for binary in localweb localwebd localweb-gateway localweb-helper localweb-gui localweb-mcp; do
+            lipo -create \
+              "target/aarch64-apple-darwin/release/$binary" \
+              "target/x86_64-apple-darwin/release/$binary" \
+              -output "target/universal/release/$binary"
+          done
+          file target/universal/release/localweb | grep -q "universal binary"
+      - name: Smoke the universal binaries
+        run: bash scripts/macos-smoke.sh target/universal/release
+      - name: Build the installer
+        env:
+          LOCALWEB_BIN_DIR: target/universal/release
+        run: sh packaging/macos/build-pkg.sh
+      - uses: actions/upload-artifact@v7.0.2
+        with:
+          name: localweb-macos-universal
+          path: dist/*.pkg
+          if-no-files-found: error
+
+  hygiene:
+    name: Repository hygiene and dependency security
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Check tracked files for personal data and credentials
+        run: |
+          bash scripts/test-hygiene.sh
+          bash scripts/check-hygiene.sh
+      - name: Check download publication rules
+        run: python3 scripts/test-publish-downloads.py
+      - name: Check Rust dependencies against RustSec
+        run: |
+          cargo install cargo-audit --locked
+          cargo audit
+
+  release:
+    name: Publish verified installers
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [hygiene, linux, windows-wine, windows-native, macos-package]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v8.0.2
+        with:
+          name: localweb-ubuntu-amd64
+          path: release-files/ubuntu
+      - uses: actions/download-artifact@v8.0.2
+        with:
+          name: localweb-arch-omarchy-amd64
+          path: release-files/arch
+      - uses: actions/download-artifact@v8.0.2
+        with:
+          name: localweb-macos-universal
+          path: release-files/macos
+      - uses: actions/download-artifact@v8.0.2
+        with:
+          name: localweb-windows-amd64
+          path: release-files/windows
+      - name: Verify required checks for the source commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUILD_SHA: ${{ github.sha }}
+          BUILD_RUN_ID: ${{ github.run_id }}
+        run: python3 scripts/publish-downloads.py verify
+      - name: Publish packages for the tested tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          test "$(git rev-parse "$TAG^{commit}")" = "$GITHUB_SHA"
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          test "v$version" = "$TAG"
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib
+          root = Path('release-files')
+          packages = [p for p in root.rglob('*') if p.is_file() and p.name.endswith(('.deb', '.pkg.tar.zst', '.pkg', '.zip'))]
+          assert len(packages) == 4, packages
+          Path('SHA256SUMS').write_text(''.join(f'{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.name}\n' for p in sorted(packages)))
+          PY
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --verify-tag --title "LocalWeb $version" --notes-file CHANGELOG.md
+          fi
+          gh release upload "$TAG" release-files/*/*.deb release-files/*/*.pkg.tar.zst release-files/*/*.pkg release-files/*/*.zip SHA256SUMS
