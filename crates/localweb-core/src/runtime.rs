@@ -650,6 +650,135 @@ impl RuntimeLayout {
         }
     }
 
+    /// Resolves the MariaDB logical dump tool.
+    ///
+    /// The packaged runtime bundles `mariadb-dump`; installations that only
+    /// provide `mysqldump` are accepted because it shares the dump format.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when neither executable is available.
+    pub fn mariadb_dump(&self) -> Result<PathBuf> {
+        let mut candidates = Vec::new();
+        #[cfg(windows)]
+        {
+            candidates.push(self.root.join("mariadb/bin/mariadb-dump.exe"));
+            candidates.push(self.root.join("mariadb/bin/mysqldump.exe"));
+            if let Ok(base) = self.mariadb().map(|(server, _, _)| {
+                server
+                    .parent()
+                    .and_then(Path::parent)
+                    .map(Path::to_path_buf)
+                    .unwrap_or_else(|| self.root.join("mariadb"))
+            }) {
+                candidates.push(base.join("bin/mariadb-dump.exe"));
+                candidates.push(base.join("bin/mysqldump.exe"));
+            }
+            for name in ["mariadb-dump.exe", "mysqldump.exe"] {
+                if let Some(path) = which(name) {
+                    candidates.push(path);
+                }
+            }
+        }
+        #[cfg(not(windows))]
+        {
+            candidates.push(self.root.join("mariadb/bin/mariadb-dump"));
+            candidates.push(self.root.join("mariadb/bin/mysqldump"));
+            #[cfg(target_os = "macos")]
+            if let Some(directory) = macos_opt_dir("mariadb") {
+                candidates.push(directory.join("bin/mariadb-dump"));
+                candidates.push(directory.join("bin/mysqldump"));
+            }
+            if let Some(path) = path_tool("mariadb-dump") {
+                candidates.push(path);
+            }
+            if let Some(path) = path_tool("mysqldump") {
+                candidates.push(path);
+            }
+        }
+        select_tool(candidates, "MariaDB dump tool (mariadb-dump or mysqldump)")
+    }
+
+    /// Resolves the MySQL logical dump tool.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when `mysqldump` is unavailable.
+    pub fn mysql_dump(&self) -> Result<PathBuf> {
+        let mut candidates = Vec::new();
+        #[cfg(windows)]
+        {
+            candidates.push(self.root.join("mysql/bin/mysqldump.exe"));
+            if let Ok(base) = self.mysql().map(|(server, _)| {
+                server
+                    .parent()
+                    .and_then(Path::parent)
+                    .map(Path::to_path_buf)
+                    .unwrap_or_else(|| self.root.join("mysql"))
+            }) {
+                candidates.push(base.join("bin/mysqldump.exe"));
+            }
+            if let Some(path) = which("mysqldump.exe") {
+                candidates.push(path);
+            }
+        }
+        #[cfg(not(windows))]
+        {
+            candidates.push(self.root.join("mysql/bin/mysqldump"));
+            #[cfg(target_os = "macos")]
+            if let Some(directory) = macos_opt_dir("mysql") {
+                candidates.push(directory.join("bin/mysqldump"));
+            }
+            if let Some(path) = path_tool("mysqldump") {
+                candidates.push(path);
+            }
+        }
+        select_tool(candidates, "MySQL dump tool (mysqldump)")
+    }
+
+    /// Resolves PostgreSQL's `pg_dump` and `pg_restore`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when either executable is missing.
+    pub fn postgres_dump_tools(&self) -> Result<(PathBuf, PathBuf)> {
+        let mut directories = Vec::new();
+        #[cfg(windows)]
+        {
+            directories.push(self.root.join("postgres/bin"));
+            if let Ok((_, _, psql)) = self.postgres()
+                && let Some(directory) = psql.parent()
+            {
+                directories.push(directory.to_path_buf());
+            }
+            if let Some(base) = windows_tool_base("pg_dump.exe", "postgresql") {
+                directories.push(base.join("bin"));
+            }
+        }
+        #[cfg(not(windows))]
+        {
+            directories.push(self.root.join("postgres/bin"));
+            #[cfg(target_os = "macos")]
+            if let Some(directory) = macos_postgres_dir() {
+                directories.push(directory.join("bin"));
+            }
+        };
+        let dump = directories
+            .iter()
+            .map(|directory| directory.join(exe("pg_dump")))
+            .find(|path| path.is_file());
+        let restore = directories
+            .iter()
+            .map(|directory| directory.join(exe("pg_restore")))
+            .find(|path| path.is_file());
+        match (dump, restore) {
+            (Some(dump), Some(restore)) => Ok((dump, restore)),
+            _ => Err(LocalWebError::RuntimeNotInstalled(
+                "PostgreSQL dump tools (pg_dump and pg_restore) are missing".into(),
+            )),
+        }
+    }
+
     /// Resolves Redis server and client executables.
     ///
     /// # Errors
@@ -823,6 +952,32 @@ impl RuntimeLayout {
     }
 }
 
+fn select_tool(candidates: Vec<PathBuf>, label: &str) -> Result<PathBuf> {
+    candidates
+        .into_iter()
+        .find(|path| path.is_file())
+        .ok_or_else(|| LocalWebError::RuntimeNotInstalled(format!("{label} is not installed")))
+}
+
+#[cfg(windows)]
+fn exe(name: &str) -> String {
+    format!("{name}.exe")
+}
+
+#[cfg(not(windows))]
+fn exe(name: &str) -> String {
+    name.to_owned()
+}
+
+#[cfg(not(windows))]
+fn path_tool(name: &str) -> Option<PathBuf> {
+    std::env::var_os("PATH")
+        .into_iter()
+        .flat_map(|value| std::env::split_paths(&value).collect::<Vec<_>>())
+        .map(|directory| directory.join(name))
+        .find(|path| path.is_file())
+}
+
 #[cfg(windows)]
 fn windows_home() -> Option<PathBuf> {
     std::env::var_os("USERPROFILE").map(PathBuf::from)
@@ -915,10 +1070,49 @@ fn homebrew_roots() -> [PathBuf; 2] {
 
 #[cfg(target_os = "macos")]
 fn macos_opt_dir(formula: &str) -> Option<PathBuf> {
-    homebrew_roots()
-        .into_iter()
-        .map(|root| root.join("opt").join(formula))
-        .find(|path| path.is_dir())
+    for root in homebrew_roots() {
+        let exact = root.join("opt").join(formula);
+        if exact.is_dir() {
+            return Some(exact);
+        }
+    }
+    // Versioned formulae such as `mariadb@11.8`, `mysql@8.4` and
+    // `postgresql@18` install under their versioned name. Pick the highest
+    // installed version when the unversioned link is absent.
+    let mut best: Option<(Vec<u64>, PathBuf)> = None;
+    for root in homebrew_roots() {
+        let Ok(entries) = fs::read_dir(root.join("opt")) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let Some(name) = name.to_str() else {
+                continue;
+            };
+            let Some(version) = versioned_formula_match(name, formula) else {
+                continue;
+            };
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+            if best.as_ref().is_none_or(|(current, _)| version > *current) {
+                best = Some((version, path));
+            }
+        }
+    }
+    best.map(|(_, path)| path)
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn versioned_formula_match(name: &str, formula: &str) -> Option<Vec<u64>> {
+    let version = name.strip_prefix(formula)?.strip_prefix('@')?;
+    let parts = version
+        .split('.')
+        .map(str::parse)
+        .collect::<std::result::Result<Vec<u64>, _>>()
+        .ok()?;
+    (!parts.is_empty()).then_some(parts)
 }
 
 #[cfg(target_os = "macos")]
@@ -971,6 +1165,7 @@ fn macos_composer_phar() -> Option<PathBuf> {
 #[cfg(target_os = "macos")]
 fn macos_postgres_dir() -> Option<PathBuf> {
     [
+        "postgresql@18",
         "postgresql@17",
         "postgresql@16",
         "postgresql@15",
@@ -1057,6 +1252,57 @@ mod tests {
         assert!(matched);
         fs::remove_dir_all(root).unwrap();
     }
+    #[test]
+    fn runtime_discovers_dump_tools_from_the_private_root() {
+        let root = std::env::temp_dir().join(format!("lw-dump-tools-{}", uuid::Uuid::new_v4()));
+        #[cfg(windows)]
+        let files = [
+            "mariadb/bin/mariadb-dump.exe",
+            "mysql/bin/mysqldump.exe",
+            "postgres/bin/pg_dump.exe",
+            "postgres/bin/pg_restore.exe",
+        ];
+        #[cfg(not(windows))]
+        let files = [
+            "mariadb/bin/mariadb-dump",
+            "mysql/bin/mysqldump",
+            "postgres/bin/pg_dump",
+            "postgres/bin/pg_restore",
+        ];
+        for relative in files {
+            let path = root.join(relative);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(&path, b"").unwrap();
+        }
+        let layout = RuntimeLayout::from_root(root.clone());
+        assert_eq!(layout.mariadb_dump().unwrap(), root.join(files[0]));
+        assert_eq!(layout.mysql_dump().unwrap(), root.join(files[1]));
+        let (dump, restore) = layout.postgres_dump_tools().unwrap();
+        assert_eq!(dump, root.join(files[2]));
+        assert_eq!(restore, root.join(files[3]));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn versioned_formulae_are_recognized_without_matching_prefixes() {
+        assert_eq!(
+            versioned_formula_match("mariadb@11.8", "mariadb"),
+            Some(vec![11, 8])
+        );
+        assert_eq!(
+            versioned_formula_match("mysql@8.4", "mysql"),
+            Some(vec![8, 4])
+        );
+        assert_eq!(
+            versioned_formula_match("postgresql@18", "postgresql"),
+            Some(vec![18])
+        );
+        assert_eq!(versioned_formula_match("mariadb", "mariadb"), None);
+        assert_eq!(versioned_formula_match("mariadb-backup", "mariadb"), None);
+        assert_eq!(versioned_formula_match("mysql@latest", "mysql"), None);
+        assert_eq!(versioned_formula_match("mysql@8.4", "mariadb"), None);
+    }
+
     #[test]
     fn bundled_layout_is_deterministic() {
         let layout = RuntimeLayout::from_root(PathBuf::from("/opt/localweb-runtime"));

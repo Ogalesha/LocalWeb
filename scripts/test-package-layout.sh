@@ -18,14 +18,18 @@ for relative in \
     mariadb/bin/mariadbd \
     mariadb/bin/mariadb-install-db \
     mariadb/bin/mariadb \
+    mariadb/bin/mariadb-dump \
     mariadb/bin/my_print_defaults \
     mariadb/bin/resolveip \
     mariadb/share/mariadb/fill_help_tables.sql \
     mysql/bin/mysqld \
     mysql/bin/mysql \
+    mysql/bin/mysqldump \
     postgres/bin/postgres \
     postgres/bin/initdb \
     postgres/bin/psql \
+    postgres/bin/pg_dump \
+    postgres/bin/pg_restore \
     postgres/share/postgres.bki \
     mailpit/bin/mailpit \
     redis/bin/redis-server \

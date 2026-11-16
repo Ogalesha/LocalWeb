@@ -1,6 +1,7 @@
 //! Defines shared `LocalWeb` models, validation, paths, and daemon protocol.
 
 use chrono::{DateTime, Utc};
+use database::{CompressionFormat, DatabaseOperationResult, DatabaseSnapshot, SnapshotSelector};
 use serde::{Deserialize, Serialize};
 #[cfg(unix)]
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
@@ -16,6 +17,7 @@ use uuid::Uuid;
 
 pub mod certificate;
 pub mod copy;
+pub mod database;
 pub mod hosts;
 pub mod platform;
 pub mod privilege;
@@ -1316,6 +1318,10 @@ pub fn atomic_write(path: &Path, bytes: &[u8], mode: u32) -> Result<()> {
     result
 }
 
+const fn default_true() -> bool {
+    true
+}
+
 /// One versioned request sent to the daemon.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data", rename_all = "snake_case")]
@@ -1375,6 +1381,79 @@ pub enum Request {
         /// Project name.
         name: String,
     },
+    /// Creates a database-only snapshot for one project.
+    DatabaseSnapshotCreate {
+        /// Project name.
+        project: String,
+        /// Optional display name; a timestamped name is generated when absent.
+        #[serde(default)]
+        name: Option<String>,
+    },
+    /// Lists a project's database snapshots, newest first.
+    DatabaseSnapshotList {
+        /// Project name.
+        project: String,
+    },
+    /// Restores a project database snapshot.
+    DatabaseSnapshotRestore {
+        /// Project name.
+        project: String,
+        /// Snapshot selector.
+        snapshot: SnapshotSelector,
+        /// Whether to create a safety snapshot before replacing data.
+        #[serde(default = "default_true")]
+        safety_snapshot: bool,
+        /// Explicit acknowledgement that current database data is replaced.
+        #[serde(default)]
+        confirm: bool,
+    },
+    /// Deletes one database snapshot.
+    DatabaseSnapshotDelete {
+        /// Project name.
+        project: String,
+        /// Snapshot selector.
+        snapshot: SnapshotSelector,
+        /// Explicit acknowledgement of the irreversible deletion.
+        #[serde(default)]
+        confirm: bool,
+    },
+    /// Deletes every database snapshot for one project.
+    DatabaseSnapshotCleanup {
+        /// Project name.
+        project: String,
+        /// Explicit acknowledgement of the irreversible deletion.
+        #[serde(default)]
+        confirm: bool,
+    },
+    /// Exports the project database to a SQL file, optionally compressed.
+    DatabaseExport {
+        /// Project name.
+        project: String,
+        /// Absolute destination path.
+        destination: PathBuf,
+        /// Optional compression override; inferred from the extension when absent.
+        #[serde(default)]
+        compression: Option<CompressionFormat>,
+        /// Whether to replace an existing destination file.
+        #[serde(default)]
+        overwrite: bool,
+    },
+    /// Imports a SQL dump into the project database.
+    DatabaseImport {
+        /// Project name.
+        project: String,
+        /// Absolute source path (`.sql`, `.sql.gz`, or `.sql.zst`).
+        source: PathBuf,
+        /// Import without dropping existing objects first.
+        #[serde(default)]
+        no_drop: bool,
+        /// Whether to create a safety snapshot before replacing data.
+        #[serde(default = "default_true")]
+        safety_snapshot: bool,
+        /// Explicit acknowledgement that current database data is replaced.
+        #[serde(default)]
+        confirm: bool,
+    },
     /// Lists the bundled runtime components.
     RuntimeList,
     /// Returns the command execution specification for a project.
@@ -1423,6 +1502,10 @@ pub enum Response {
     Environment(BTreeMap<String, String>),
     /// Certificate authority state.
     Ca(CaStatus),
+    /// A project's database snapshots, newest first.
+    Snapshots(Vec<DatabaseSnapshot>),
+    /// Result of a database snapshot, export, import, restore, or deletion.
+    DatabaseOperation(Box<DatabaseOperationResult>),
     /// Failure with a stable code and a human-readable message.
     Error {
         /// Stable error code, see [`LocalWebError::code`].

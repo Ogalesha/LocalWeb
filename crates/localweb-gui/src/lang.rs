@@ -3261,6 +3261,809 @@ impl Lang {
             }
         }
     }
+    pub fn database_management(self) -> &'static str {
+        match self {
+            Self::English => "Database management",
+            Self::Italiano => "Gestione database",
+            Self::Shqip => "Menaxhimi i bazës së dhënave",
+            Self::Spanish => "Gestión de base de datos",
+            Self::French => "Gestion de la base de données",
+            Self::Portuguese => "Gestão da base de dados",
+            Self::Russian => "Управление базой данных",
+            Self::Polish => "Zarządzanie bazą danych",
+            Self::Ukrainian => "Керування базою даних",
+            Self::Turkish => "Veritabanı yönetimi",
+            Self::Greek => "Διαχείριση βάσης δεδομένων",
+            Self::Hindi => "डेटाबेस प्रबंधन",
+            Self::Chinese => "数据库管理",
+            Self::Swedish => "Databashantering",
+        }
+    }
+
+    pub fn database_unavailable(self) -> &'static str {
+        match self {
+            Self::English => {
+                "This project has no database. Add one in project settings to manage snapshots."
+            }
+            Self::Italiano => {
+                "Questo progetto non ha un database. Aggiungine uno nelle impostazioni del progetto per gestire gli snapshot."
+            }
+            Self::Shqip => {
+                "Ky projekt nuk ka bazë të dhënash. Shtoni një te cilësimet e projektit për të menaxhuar pamjet."
+            }
+            Self::Spanish => {
+                "Este proyecto no tiene base de datos. Añade una en los ajustes del proyecto para gestionar instantáneas."
+            }
+            Self::French => {
+                "Ce projet n'a pas de base de données. Ajoutez-en une dans les paramètres du projet pour gérer les instantanés."
+            }
+            Self::Portuguese => {
+                "Este projeto não tem base de dados. Adicione uma nas definições do projeto para gerir instantâneos."
+            }
+            Self::Russian => {
+                "У этого проекта нет базы данных. Добавьте её в настройках проекта, чтобы управлять снимками."
+            }
+            Self::Polish => {
+                "Ten projekt nie ma bazy danych. Dodaj ją w ustawieniach projektu, aby zarządzać migawkami."
+            }
+            Self::Ukrainian => {
+                "Цей проєкт не має бази даних. Додайте її в налаштуваннях проєкту, щоб керувати знімками."
+            }
+            Self::Turkish => {
+                "Bu projede veritabanı yok. Anlık görüntüleri yönetmek için proje ayarlarından bir tane ekleyin."
+            }
+            Self::Greek => {
+                "Αυτό το έργο δεν έχει βάση δεδομένων. Προσθέστε μία στις ρυθμίσεις του έργου για να διαχειρίζεστε στιγμιότυπα."
+            }
+            Self::Hindi => {
+                "इस प्रोजेक्ट में डेटाबेस नहीं है। स्नैपशॉट प्रबंधित करने के लिए प्रोजेक्ट सेटिंग्स में एक जोड़ें।"
+            }
+            Self::Chinese => "此项目没有数据库。请在项目设置中添加数据库以管理快照。",
+            Self::Swedish => {
+                "Det här projektet har ingen databas. Lägg till en i projektinställningarna för att hantera ögonblicksbilder."
+            }
+        }
+    }
+
+    pub fn database_snapshots(self) -> &'static str {
+        match self {
+            Self::English => "Snapshots",
+            Self::Italiano => "Snapshot",
+            Self::Shqip => "Pamjet",
+            Self::Spanish => "Instantáneas",
+            Self::French => "Instantanés",
+            Self::Portuguese => "Instantâneos",
+            Self::Russian => "Снимки",
+            Self::Polish => "Migawki",
+            Self::Ukrainian => "Знімки",
+            Self::Turkish => "Anlık görüntüler",
+            Self::Greek => "Στιγμιότυπα",
+            Self::Hindi => "स्नैपशॉट",
+            Self::Chinese => "快照",
+            Self::Swedish => "Ögonblicksbilder",
+        }
+    }
+
+    pub fn database_snapshot_name(self) -> &'static str {
+        match self {
+            Self::English => "Snapshot name (optional)",
+            Self::Italiano => "Nome snapshot (facoltativo)",
+            Self::Shqip => "Emri i pamjes (opsional)",
+            Self::Spanish => "Nombre de la instantánea (opcional)",
+            Self::French => "Nom de l'instantané (facultatif)",
+            Self::Portuguese => "Nome do instantâneo (opcional)",
+            Self::Russian => "Имя снимка (необязательно)",
+            Self::Polish => "Nazwa migawki (opcjonalnie)",
+            Self::Ukrainian => "Назва знімка (необов’язково)",
+            Self::Turkish => "Anlık görüntü adı (isteğe bağlı)",
+            Self::Greek => "Όνομα στιγμιότυπου (προαιρετικό)",
+            Self::Hindi => "स्नैपशॉट नाम (वैकल्पिक)",
+            Self::Chinese => "快照名称（可选）",
+            Self::Swedish => "Namn på ögonblicksbild (valfritt)",
+        }
+    }
+
+    pub fn database_create_snapshot(self) -> &'static str {
+        match self {
+            Self::English => "Create snapshot",
+            Self::Italiano => "Crea snapshot",
+            Self::Shqip => "Krijo pamje",
+            Self::Spanish => "Crear instantánea",
+            Self::French => "Créer un instantané",
+            Self::Portuguese => "Criar instantâneo",
+            Self::Russian => "Создать снимок",
+            Self::Polish => "Utwórz migawkę",
+            Self::Ukrainian => "Створити знімок",
+            Self::Turkish => "Anlık görüntü oluştur",
+            Self::Greek => "Δημιουργία στιγμιότυπου",
+            Self::Hindi => "स्नैपशॉट बनाएँ",
+            Self::Chinese => "创建快照",
+            Self::Swedish => "Skapa ögonblicksbild",
+        }
+    }
+
+    pub fn database_refresh(self) -> &'static str {
+        match self {
+            Self::English => "Refresh list",
+            Self::Italiano => "Aggiorna elenco",
+            Self::Shqip => "Rifresko listën",
+            Self::Spanish => "Actualizar lista",
+            Self::French => "Actualiser la liste",
+            Self::Portuguese => "Atualizar lista",
+            Self::Russian => "Обновить список",
+            Self::Polish => "Odśwież listę",
+            Self::Ukrainian => "Оновити список",
+            Self::Turkish => "Listeyi yenile",
+            Self::Greek => "Ανανέωση λίστας",
+            Self::Hindi => "सूची ताज़ा करें",
+            Self::Chinese => "刷新列表",
+            Self::Swedish => "Uppdatera listan",
+        }
+    }
+
+    pub fn database_empty(self) -> &'static str {
+        match self {
+            Self::English => "No snapshots yet.",
+            Self::Italiano => "Nessuno snapshot.",
+            Self::Shqip => "Nuk ka pamje ende.",
+            Self::Spanish => "Aún no hay instantáneas.",
+            Self::French => "Aucun instantané pour le moment.",
+            Self::Portuguese => "Ainda não há instantâneos.",
+            Self::Russian => "Снимков пока нет.",
+            Self::Polish => "Brak migawek.",
+            Self::Ukrainian => "Знімків ще немає.",
+            Self::Turkish => "Henüz anlık görüntü yok.",
+            Self::Greek => "Δεν υπάρχουν στιγμιότυπα ακόμη.",
+            Self::Hindi => "अभी कोई स्नैपशॉट नहीं है।",
+            Self::Chinese => "暂无快照。",
+            Self::Swedish => "Inga ögonblicksbilder ännu.",
+        }
+    }
+
+    pub fn database_snapshot_column(self) -> &'static str {
+        match self {
+            Self::English | Self::Italiano => "Snapshot",
+            Self::Shqip => "Pamja",
+            Self::Spanish => "Instantánea",
+            Self::French => "Instantané",
+            Self::Portuguese => "Instantâneo",
+            Self::Russian => "Снимок",
+            Self::Polish => "Migawka",
+            Self::Ukrainian => "Знімок",
+            Self::Turkish => "Anlık görüntü",
+            Self::Greek => "Στιγμιότυπο",
+            Self::Hindi => "स्नैपशॉट",
+            Self::Chinese => "快照",
+            Self::Swedish => "Ögonblicksbild",
+        }
+    }
+
+    pub fn database_created_column(self) -> &'static str {
+        match self {
+            Self::English => "Created (UTC)",
+            Self::Italiano => "Creato (UTC)",
+            Self::Shqip => "Krijuar (UTC)",
+            Self::Spanish => "Creada (UTC)",
+            Self::French => "Créé (UTC)",
+            Self::Portuguese => "Criado (UTC)",
+            Self::Russian => "Создан (UTC)",
+            Self::Polish => "Utworzono (UTC)",
+            Self::Ukrainian => "Створено (UTC)",
+            Self::Turkish => "Oluşturuldu (UTC)",
+            Self::Greek => "Δημιουργήθηκε (UTC)",
+            Self::Hindi => "बनाया गया (UTC)",
+            Self::Chinese => "创建时间 (UTC)",
+            Self::Swedish => "Skapad (UTC)",
+        }
+    }
+
+    pub fn database_size_column(self) -> &'static str {
+        match self {
+            Self::English => "Size",
+            Self::Italiano => "Dimensione",
+            Self::Shqip => "Madhësia",
+            Self::Spanish => "Tamaño",
+            Self::French => "Taille",
+            Self::Portuguese => "Tamanho",
+            Self::Russian => "Размер",
+            Self::Polish => "Rozmiar",
+            Self::Ukrainian => "Розмір",
+            Self::Turkish => "Boyut",
+            Self::Greek => "Μέγεθος",
+            Self::Hindi => "आकार",
+            Self::Chinese => "大小",
+            Self::Swedish => "Storlek",
+        }
+    }
+
+    pub fn database_actions_column(self) -> &'static str {
+        match self {
+            Self::English | Self::French => "Actions",
+            Self::Italiano => "Azioni",
+            Self::Shqip => "Veprimet",
+            Self::Spanish => "Acciones",
+            Self::Portuguese => "Ações",
+            Self::Russian => "Действия",
+            Self::Polish => "Akcje",
+            Self::Ukrainian => "Дії",
+            Self::Turkish => "İşlemler",
+            Self::Greek => "Ενέργειες",
+            Self::Hindi => "क्रियाएँ",
+            Self::Chinese => "操作",
+            Self::Swedish => "Åtgärder",
+        }
+    }
+
+    pub fn database_safety_tag(self) -> &'static str {
+        match self {
+            Self::English => "safety",
+            Self::Italiano => "sicurezza",
+            Self::Shqip => "siguria",
+            Self::Spanish => "seguridad",
+            Self::French => "sécurité",
+            Self::Portuguese => "segurança",
+            Self::Russian => "безопасность",
+            Self::Polish => "bezpieczeństwo",
+            Self::Ukrainian => "безпека",
+            Self::Turkish => "güvenlik",
+            Self::Greek => "ασφάλεια",
+            Self::Hindi => "सुरक्षा",
+            Self::Chinese => "安全",
+            Self::Swedish => "säkerhet",
+        }
+    }
+
+    pub fn database_restore(self) -> &'static str {
+        match self {
+            Self::English => "Restore",
+            Self::Italiano => "Ripristina",
+            Self::Shqip => "Rikthe",
+            Self::Spanish | Self::Portuguese => "Restaurar",
+            Self::French => "Restaurer",
+            Self::Russian => "Восстановить",
+            Self::Polish => "Przywróć",
+            Self::Ukrainian => "Відновити",
+            Self::Turkish => "Geri yükle",
+            Self::Greek => "Επαναφορά",
+            Self::Hindi => "पुनर्स्थापित करें",
+            Self::Chinese => "恢复",
+            Self::Swedish => "Återställ",
+        }
+    }
+
+    pub fn database_export(self) -> &'static str {
+        match self {
+            Self::English => "Export SQL",
+            Self::Italiano => "Esporta SQL",
+            Self::Shqip => "Eksporto SQL",
+            Self::Spanish | Self::Portuguese => "Exportar SQL",
+            Self::French => "Exporter SQL",
+            Self::Russian => "Экспорт SQL",
+            Self::Polish => "Eksportuj SQL",
+            Self::Ukrainian => "Експорт SQL",
+            Self::Turkish => "SQL dışa aktar",
+            Self::Greek => "Εξαγωγή SQL",
+            Self::Hindi => "SQL निर्यात करें",
+            Self::Chinese => "导出 SQL",
+            Self::Swedish => "Exportera SQL",
+        }
+    }
+
+    pub fn database_import(self) -> &'static str {
+        match self {
+            Self::English => "Import SQL",
+            Self::Italiano => "Importa SQL",
+            Self::Shqip => "Importo SQL",
+            Self::Spanish | Self::Portuguese => "Importar SQL",
+            Self::French => "Importer SQL",
+            Self::Russian => "Импорт SQL",
+            Self::Polish => "Importuj SQL",
+            Self::Ukrainian => "Імпорт SQL",
+            Self::Turkish => "SQL içe aktar",
+            Self::Greek => "Εισαγωγή SQL",
+            Self::Hindi => "SQL आयात करें",
+            Self::Chinese => "导入 SQL",
+            Self::Swedish => "Importera SQL",
+        }
+    }
+
+    pub fn database_cleanup(self) -> &'static str {
+        match self {
+            Self::English => "Delete all",
+            Self::Italiano => "Elimina tutto",
+            Self::Shqip => "Fshi të gjitha",
+            Self::Spanish => "Eliminar todo",
+            Self::French => "Tout supprimer",
+            Self::Portuguese => "Eliminar tudo",
+            Self::Russian => "Удалить все",
+            Self::Polish => "Usuń wszystko",
+            Self::Ukrainian => "Видалити все",
+            Self::Turkish => "Tümünü sil",
+            Self::Greek => "Διαγραφή όλων",
+            Self::Hindi => "सभी हटाएँ",
+            Self::Chinese => "全部删除",
+            Self::Swedish => "Ta bort alla",
+        }
+    }
+
+    pub fn database_loading(self) -> &'static str {
+        match self {
+            Self::English => "Loading snapshots…",
+            Self::Italiano => "Caricamento snapshot…",
+            Self::Shqip => "Po ngarkohen pamjet…",
+            Self::Spanish => "Cargando instantáneas…",
+            Self::French => "Chargement des instantanés…",
+            Self::Portuguese => "A carregar instantâneos…",
+            Self::Russian => "Загрузка снимков…",
+            Self::Polish => "Ładowanie migawek…",
+            Self::Ukrainian => "Завантаження знімків…",
+            Self::Turkish => "Anlık görüntüler yükleniyor…",
+            Self::Greek => "Φόρτωση στιγμιότυπων…",
+            Self::Hindi => "स्नैपशॉट लोड हो रहे हैं…",
+            Self::Chinese => "正在加载快照…",
+            Self::Swedish => "Läser in ögonblicksbilder…",
+        }
+    }
+
+    pub fn database_load_failed(self) -> &'static str {
+        match self {
+            Self::English => "Couldn't load snapshots.",
+            Self::Italiano => "Impossibile caricare gli snapshot.",
+            Self::Shqip => "Pamjet nuk u ngarkuan.",
+            Self::Spanish => "No se pudieron cargar las instantáneas.",
+            Self::French => "Impossible de charger les instantanés.",
+            Self::Portuguese => "Não foi possível carregar os instantâneos.",
+            Self::Russian => "Не удалось загрузить снимки.",
+            Self::Polish => "Nie udało się wczytać migawek.",
+            Self::Ukrainian => "Не вдалося завантажити знімки.",
+            Self::Turkish => "Anlık görüntüler yüklenemedi.",
+            Self::Greek => "Δεν ήταν δυνατή η φόρτωση των στιγμιότυπων.",
+            Self::Hindi => "स्नैपशॉट लोड नहीं हो सके।",
+            Self::Chinese => "无法加载快照。",
+            Self::Swedish => "Det gick inte att läsa in ögonblicksbilder.",
+        }
+    }
+
+    pub fn database_busy(self) -> &'static str {
+        match self {
+            Self::English => "A database operation is running…",
+            Self::Italiano => "Operazione sul database in corso…",
+            Self::Shqip => "Një veprim në bazën e të dhënave po kryhet…",
+            Self::Spanish => "Hay una operación de base de datos en curso…",
+            Self::French => "Une opération de base de données est en cours…",
+            Self::Portuguese => "Está em curso uma operação de base de dados…",
+            Self::Russian => "Выполняется операция с базой данных…",
+            Self::Polish => "Trwa operacja na bazie danych…",
+            Self::Ukrainian => "Виконується операція з базою даних…",
+            Self::Turkish => "Veritabanı işlemi sürüyor…",
+            Self::Greek => "Εκτελείται λειτουργία βάσης δεδομένων…",
+            Self::Hindi => "डेटाबेस कार्रवाई चल रही है…",
+            Self::Chinese => "数据库操作正在进行…",
+            Self::Swedish => "En databasåtgärd pågår…",
+        }
+    }
+
+    pub fn database_export_title(self) -> &'static str {
+        match self {
+            Self::English => "Export database",
+            Self::Italiano => "Esporta database",
+            Self::Shqip => "Eksporto bazën e të dhënave",
+            Self::Spanish => "Exportar base de datos",
+            Self::French => "Exporter la base de données",
+            Self::Portuguese => "Exportar base de dados",
+            Self::Russian => "Экспорт базы данных",
+            Self::Polish => "Eksportuj bazę danych",
+            Self::Ukrainian => "Експорт бази даних",
+            Self::Turkish => "Veritabanını dışa aktar",
+            Self::Greek => "Εξαγωγή βάσης δεδομένων",
+            Self::Hindi => "डेटाबेस निर्यात करें",
+            Self::Chinese => "导出数据库",
+            Self::Swedish => "Exportera databas",
+        }
+    }
+
+    pub fn database_export_body(self) -> &'static str {
+        match self {
+            Self::English => {
+                "Write a SQL dump. The extension chooses compression: .sql, .sql.gz, or .sql.zst."
+            }
+            Self::Italiano => {
+                "Scrivi un dump SQL. L'estensione sceglie la compressione: .sql, .sql.gz o .sql.zst."
+            }
+            Self::Shqip => {
+                "Shkruaj një dump SQL. Zgjatja zgjedh kompresimin: .sql, .sql.gz ose .sql.zst."
+            }
+            Self::Spanish => {
+                "Escribe un volcado SQL. La extensión elige la compresión: .sql, .sql.gz o .sql.zst."
+            }
+            Self::French => {
+                "Écrivez un dump SQL. L'extension choisit la compression : .sql, .sql.gz ou .sql.zst."
+            }
+            Self::Portuguese => {
+                "Escreva um dump SQL. A extensão escolhe a compressão: .sql, .sql.gz ou .sql.zst."
+            }
+            Self::Russian => {
+                "Создайте SQL-дамп. Расширение определяет сжатие: .sql, .sql.gz или .sql.zst."
+            }
+            Self::Polish => {
+                "Zapisz zrzut SQL. Rozszerzenie wybiera kompresję: .sql, .sql.gz lub .sql.zst."
+            }
+            Self::Ukrainian => {
+                "Створіть SQL-дамп. Розширення визначає стиснення: .sql, .sql.gz або .sql.zst."
+            }
+            Self::Turkish => {
+                "SQL dökümü yazın. Uzantı sıkıştırmayı seçer: .sql, .sql.gz veya .sql.zst."
+            }
+            Self::Greek => {
+                "Γράψτε ένα SQL dump. Η επέκταση επιλέγει τη συμπίεση: .sql, .sql.gz ή .sql.zst."
+            }
+            Self::Hindi => "SQL डंप लिखें। एक्सटेंशन संपीड़न चुनता है: .sql, .sql.gz या .sql.zst.",
+            Self::Chinese => "写入 SQL 转储。扩展名决定压缩方式：.sql、.sql.gz 或 .sql.zst。",
+            Self::Swedish => {
+                "Skriv en SQL-dump. Filändelsen väljer komprimering: .sql, .sql.gz eller .sql.zst."
+            }
+        }
+    }
+
+    pub fn database_path(self) -> &'static str {
+        match self {
+            Self::English => "File path",
+            Self::Italiano => "Percorso file",
+            Self::Shqip => "Rruga e skedarit",
+            Self::Spanish => "Ruta del archivo",
+            Self::French => "Chemin du fichier",
+            Self::Portuguese => "Caminho do ficheiro",
+            Self::Russian => "Путь к файлу",
+            Self::Polish => "Ścieżka pliku",
+            Self::Ukrainian => "Шлях до файлу",
+            Self::Turkish => "Dosya yolu",
+            Self::Greek => "Διαδρομή αρχείου",
+            Self::Hindi => "फ़ाइल पथ",
+            Self::Chinese => "文件路径",
+            Self::Swedish => "Filsökväg",
+        }
+    }
+
+    pub fn database_absolute_path(self) -> &'static str {
+        match self {
+            Self::English => "Use an absolute file path.",
+            Self::Italiano => "Usa un percorso file assoluto.",
+            Self::Shqip => "Përdorni një rrugë absolute skedari.",
+            Self::Spanish => "Usa una ruta de archivo absoluta.",
+            Self::French => "Utilisez un chemin de fichier absolu.",
+            Self::Portuguese => "Use um caminho de ficheiro absoluto.",
+            Self::Russian => "Используйте абсолютный путь к файлу.",
+            Self::Polish => "Użyj bezwzględnej ścieżki pliku.",
+            Self::Ukrainian => "Використовуйте абсолютний шлях до файлу.",
+            Self::Turkish => "Mutlak bir dosya yolu kullanın.",
+            Self::Greek => "Χρησιμοποιήστε απόλυτη διαδρομή αρχείου.",
+            Self::Hindi => "पूर्ण फ़ाइल पथ का उपयोग करें।",
+            Self::Chinese => "使用绝对文件路径。",
+            Self::Swedish => "Använd en absolut filsökväg.",
+        }
+    }
+
+    pub fn database_replace_existing(self) -> &'static str {
+        match self {
+            Self::English => "Replace an existing file",
+            Self::Italiano => "Sostituisci un file esistente",
+            Self::Shqip => "Zëvendëso një skedar ekzistues",
+            Self::Spanish => "Reemplazar un archivo existente",
+            Self::French => "Remplacer un fichier existant",
+            Self::Portuguese => "Substituir um ficheiro existente",
+            Self::Russian => "Заменить существующий файл",
+            Self::Polish => "Zastąp istniejący plik",
+            Self::Ukrainian => "Замінити наявний файл",
+            Self::Turkish => "Mevcut dosyayı değiştir",
+            Self::Greek => "Αντικατάσταση υπάρχοντος αρχείου",
+            Self::Hindi => "मौजूदा फ़ाइल बदलें",
+            Self::Chinese => "替换现有文件",
+            Self::Swedish => "Ersätt en befintlig fil",
+        }
+    }
+
+    pub fn database_import_title(self) -> &'static str {
+        match self {
+            Self::English => "Import SQL",
+            Self::Italiano => "Importa SQL",
+            Self::Shqip => "Importo SQL",
+            Self::Spanish | Self::Portuguese => "Importar SQL",
+            Self::French => "Importer SQL",
+            Self::Russian => "Импорт SQL",
+            Self::Polish => "Importuj SQL",
+            Self::Ukrainian => "Імпорт SQL",
+            Self::Turkish => "SQL içe aktar",
+            Self::Greek => "Εισαγωγή SQL",
+            Self::Hindi => "SQL आयात करें",
+            Self::Chinese => "导入 SQL",
+            Self::Swedish => "Importera SQL",
+        }
+    }
+
+    pub fn database_import_body(self) -> &'static str {
+        match self {
+            Self::English => {
+                "The dump is checked before anything changes. Existing objects are replaced unless you keep them."
+            }
+            Self::Italiano => {
+                "Il dump viene controllato prima di modificare qualcosa. Gli oggetti esistenti vengono sostituiti se non li mantieni."
+            }
+            Self::Shqip => {
+                "Dump-i kontrollohet përpara se të ndryshojë diçka. Objektet ekzistuese zëvendësohen nëse nuk i mbani."
+            }
+            Self::Spanish => {
+                "El volcado se comprueba antes de cambiar nada. Los objetos existentes se reemplazan salvo que los conserves."
+            }
+            Self::French => {
+                "Le dump est vérifié avant toute modification. Les objets existants sont remplacés sauf si vous les conservez."
+            }
+            Self::Portuguese => {
+                "O dump é verificado antes de alterar algo. Os objetos existentes são substituídos, salvo se os mantiver."
+            }
+            Self::Russian => {
+                "Дамп проверяется до любых изменений. Существующие объекты заменяются, если их не сохранить."
+            }
+            Self::Polish => {
+                "Zrzut jest sprawdzany przed zmianami. Istniejące obiekty są zastępowane, chyba że je zachowasz."
+            }
+            Self::Ukrainian => {
+                "Дамп перевіряється до будь-яких змін. Наявні об’єкти замінюються, якщо їх не зберегти."
+            }
+            Self::Turkish => {
+                "Döküm, herhangi bir değişiklikten önce denetlenir. Mevcut nesneler, onları korumadığınız sürece değiştirilir."
+            }
+            Self::Greek => {
+                "Το dump ελέγχεται πριν αλλάξει οτιδήποτε. Τα υπάρχοντα αντικείμενα αντικαθίστανται εκτός αν τα διατηρήσετε."
+            }
+            Self::Hindi => {
+                "कुछ भी बदलने से पहले डंप की जाँच होती है। मौजूदा ऑब्जेक्ट तब तक बदले जाते हैं जब तक आप उन्हें न रखें।"
+            }
+            Self::Chinese => "更改任何内容前会先检查转储。除非保留现有对象，否则它们会被替换。",
+            Self::Swedish => {
+                "Dumphin kontrolleras innan något ändras. Befintliga objekt ersätts om du inte behåller dem."
+            }
+        }
+    }
+
+    pub fn database_keep_existing(self) -> &'static str {
+        match self {
+            Self::English => "Keep existing objects (no drop)",
+            Self::Italiano => "Mantieni gli oggetti esistenti (senza drop)",
+            Self::Shqip => "Mbaj objektet ekzistuese (pa drop)",
+            Self::Spanish => "Conservar objetos existentes (sin drop)",
+            Self::French => "Conserver les objets existants (sans drop)",
+            Self::Portuguese => "Manter objetos existentes (sem drop)",
+            Self::Russian => "Сохранить существующие объекты (без drop)",
+            Self::Polish => "Zachowaj istniejące obiekty (bez drop)",
+            Self::Ukrainian => "Зберегти наявні об’єкти (без drop)",
+            Self::Turkish => "Mevcut nesneleri koru (drop yok)",
+            Self::Greek => "Διατήρηση υπαρχόντων αντικειμένων (χωρίς drop)",
+            Self::Hindi => "मौजूदा ऑब्जेक्ट रखें (drop नहीं)",
+            Self::Chinese => "保留现有对象（不删除）",
+            Self::Swedish => "Behåll befintliga objekt (ingen drop)",
+        }
+    }
+
+    pub fn database_no_safety(self) -> &'static str {
+        match self {
+            Self::English => "No safety snapshot will be created. Recovery will not be possible.",
+            Self::Italiano => {
+                "Nessuno snapshot di sicurezza verrà creato. Il ripristino non sarà possibile."
+            }
+            Self::Shqip => {
+                "Nuk do të krijohet asnjë pamje sigurie. Rikthimi nuk do të jetë i mundur."
+            }
+            Self::Spanish => {
+                "No se creará ninguna instantánea de seguridad. No será posible recuperar."
+            }
+            Self::French => {
+                "Aucun instantané de sécurité ne sera créé. La récupération sera impossible."
+            }
+            Self::Portuguese => {
+                "Não será criado nenhum instantâneo de segurança. A recuperação não será possível."
+            }
+            Self::Russian => {
+                "Снимок безопасности не будет создан. Восстановление будет невозможно."
+            }
+            Self::Polish => {
+                "Migawka bezpieczeństwa nie zostanie utworzona. Odzyskanie nie będzie możliwe."
+            }
+            Self::Ukrainian => "Знімок безпеки не буде створено. Відновлення буде неможливим.",
+            Self::Turkish => {
+                "Güvenlik anlık görüntüsü oluşturulmayacak. Kurtarma mümkün olmayacak."
+            }
+            Self::Greek => {
+                "Δεν θα δημιουργηθεί στιγμιότυπο ασφαλείας. Η ανάκτηση δεν θα είναι δυνατή."
+            }
+            Self::Hindi => "कोई सुरक्षा स्नैपशॉट नहीं बनाया जाएगा। पुनर्प्राप्ति संभव नहीं होगी।",
+            Self::Chinese => "不会创建安全快照。将无法恢复。",
+            Self::Swedish => {
+                "Ingen säkerhetsögonblicksbild skapas. Återställning blir inte möjlig."
+            }
+        }
+    }
+
+    pub fn database_safety_first(self) -> &'static str {
+        match self {
+            Self::English => "Create a safety snapshot first",
+            Self::Italiano => "Crea prima uno snapshot di sicurezza",
+            Self::Shqip => "Krijo fillimisht një pamje sigurie",
+            Self::Spanish => "Crear primero una instantánea de seguridad",
+            Self::French => "Créer d'abord un instantané de sécurité",
+            Self::Portuguese => "Criar primeiro um instantâneo de segurança",
+            Self::Russian => "Сначала создать снимок безопасности",
+            Self::Polish => "Najpierw utwórz migawkę bezpieczeństwa",
+            Self::Ukrainian => "Спочатку створити знімок безпеки",
+            Self::Turkish => "Önce bir güvenlik anlık görüntüsü oluştur",
+            Self::Greek => "Δημιουργία στιγμιότυπου ασφαλείας πρώτα",
+            Self::Hindi => "पहले सुरक्षा स्नैपशॉट बनाएँ",
+            Self::Chinese => "先创建安全快照",
+            Self::Swedish => "Skapa en säkerhetsögonblicksbild först",
+        }
+    }
+
+    pub fn database_restore_title(self) -> &'static str {
+        match self {
+            Self::English => "Restore snapshot",
+            Self::Italiano => "Ripristina snapshot",
+            Self::Shqip => "Rikthe pamjen",
+            Self::Spanish => "Restaurar instantánea",
+            Self::French => "Restaurer l'instantané",
+            Self::Portuguese => "Restaurar instantâneo",
+            Self::Russian => "Восстановить снимок",
+            Self::Polish => "Przywróć migawkę",
+            Self::Ukrainian => "Відновити знімок",
+            Self::Turkish => "Anlık görüntüyü geri yükle",
+            Self::Greek => "Επαναφορά στιγμιότυπου",
+            Self::Hindi => "स्नैपशॉट पुनर्स्थापित करें",
+            Self::Chinese => "恢复快照",
+            Self::Swedish => "Återställ ögonblicksbild",
+        }
+    }
+
+    pub fn database_restore_body(self, name: &str, project: &str) -> String {
+        match self {
+            Self::English => {
+                format!("Restoring {name} replaces all current database data in {project}.")
+            }
+            Self::Italiano => format!(
+                "Il ripristino di {name} sostituisce tutti i dati attuali del database in {project}."
+            ),
+            Self::Shqip => format!(
+                "Rikthimi i {name} zëvendëson të gjitha të dhënat aktuale të bazës në {project}."
+            ),
+            Self::Spanish => format!(
+                "Restaurar {name} reemplaza todos los datos actuales de la base de datos en {project}."
+            ),
+            Self::French => format!(
+                "La restauration de {name} remplace toutes les données actuelles de la base de {project}."
+            ),
+            Self::Portuguese => format!(
+                "Restaurar {name} substitui todos os dados atuais da base de dados em {project}."
+            ),
+            Self::Russian => {
+                format!("Восстановление {name} заменит все текущие данные базы в {project}.")
+            }
+            Self::Polish => {
+                format!("Przywrócenie {name} zastąpi wszystkie bieżące dane bazy w {project}.")
+            }
+            Self::Ukrainian => {
+                format!("Відновлення {name} замінить усі поточні дані бази в {project}.")
+            }
+            Self::Turkish => format!(
+                "{name} geri yüklenmesi {project} içindeki tüm güncel veritabanı verilerini değiştirir."
+            ),
+            Self::Greek => format!(
+                "Η επαναφορά του {name} αντικαθιστά όλα τα τρέχοντα δεδομένα της βάσης στο {project}."
+            ),
+            Self::Hindi => {
+                format!("{name} को पुनर्स्थापित करने से {project} के सभी मौजूदा डेटाबेस डेटा बदल जाते हैं।")
+            }
+            Self::Chinese => format!("恢复 {name} 将替换 {project} 中的所有当前数据库数据。"),
+            Self::Swedish => {
+                format!("Återställning av {name} ersätter alla aktuella databasdata i {project}.")
+            }
+        }
+    }
+
+    pub fn database_delete_title(self) -> &'static str {
+        match self {
+            Self::English => "Delete snapshot",
+            Self::Italiano => "Elimina snapshot",
+            Self::Shqip => "Fshi pamjen",
+            Self::Spanish => "Eliminar instantánea",
+            Self::French => "Supprimer l'instantané",
+            Self::Portuguese => "Eliminar instantâneo",
+            Self::Russian => "Удалить снимок",
+            Self::Polish => "Usuń migawkę",
+            Self::Ukrainian => "Видалити знімок",
+            Self::Turkish => "Anlık görüntüyü sil",
+            Self::Greek => "Διαγραφή στιγμιότυπου",
+            Self::Hindi => "स्नैपशॉट हटाएँ",
+            Self::Chinese => "删除快照",
+            Self::Swedish => "Ta bort ögonblicksbild",
+        }
+    }
+
+    pub fn database_delete_body(self, name: &str, project: &str) -> String {
+        match self {
+            Self::English => format!("Deleting {name} from {project} is irreversible."),
+            Self::Italiano => {
+                format!("L'eliminazione di {name} da {project} è irreversibile.")
+            }
+            Self::Shqip => format!("Fshirja e {name} nga {project} është e pakthyeshme."),
+            Self::Spanish => format!("Eliminar {name} de {project} es irreversible."),
+            Self::French => format!("Supprimer {name} de {project} est irréversible."),
+            Self::Portuguese => format!("Eliminar {name} de {project} é irreversível."),
+            Self::Russian => format!("Удаление {name} из {project} необратимо."),
+            Self::Polish => format!("Usunięcie {name} z {project} jest nieodwracalne."),
+            Self::Ukrainian => format!("Видалення {name} з {project} є незворотним."),
+            Self::Turkish => format!("{name} öğesini {project} içinden silmek geri alınamaz."),
+            Self::Greek => format!("Η διαγραφή του {name} από το {project} είναι μη αναστρέψιμη."),
+            Self::Hindi => format!("{project} से {name} हटाना अपरिवर्तनीय है।"),
+            Self::Chinese => format!("从 {project} 删除 {name} 不可撤销。"),
+            Self::Swedish => format!("Borttagning av {name} från {project} är oåterkallelig."),
+        }
+    }
+
+    pub fn database_cleanup_title(self) -> &'static str {
+        match self {
+            Self::English => "Delete all snapshots",
+            Self::Italiano => "Elimina tutti gli snapshot",
+            Self::Shqip => "Fshi të gjitha pamjet",
+            Self::Spanish => "Eliminar todas las instantáneas",
+            Self::French => "Supprimer tous les instantanés",
+            Self::Portuguese => "Eliminar todos os instantâneos",
+            Self::Russian => "Удалить все снимки",
+            Self::Polish => "Usuń wszystkie migawki",
+            Self::Ukrainian => "Видалити всі знімки",
+            Self::Turkish => "Tüm anlık görüntüleri sil",
+            Self::Greek => "Διαγραφή όλων των στιγμιότυπων",
+            Self::Hindi => "सभी स्नैपशॉट हटाएँ",
+            Self::Chinese => "删除所有快照",
+            Self::Swedish => "Ta bort alla ögonblicksbilder",
+        }
+    }
+
+    pub fn database_cleanup_body(self, project: &str) -> String {
+        match self {
+            Self::English => format!("Every snapshot of {project} is deleted permanently."),
+            Self::Italiano => {
+                format!("Ogni snapshot di {project} viene eliminato definitivamente.")
+            }
+            Self::Shqip => format!("Të gjitha pamjet e {project} fshihen përgjithmonë."),
+            Self::Spanish => {
+                format!("Todas las instantáneas de {project} se eliminan permanentemente.")
+            }
+            Self::French => {
+                format!("Tous les instantanés de {project} sont supprimés définitivement.")
+            }
+            Self::Portuguese => {
+                format!("Todos os instantâneos de {project} são eliminados permanentemente.")
+            }
+            Self::Russian => {
+                format!("Все снимки {project} будут удалены безвозвратно.")
+            }
+            Self::Polish => {
+                format!("Wszystkie migawki {project} zostaną trwale usunięte.")
+            }
+            Self::Ukrainian => {
+                format!("Усі знімки {project} буде видалено назавжди.")
+            }
+            Self::Turkish => {
+                format!("{project} için tüm anlık görüntüler kalıcı olarak silinir.")
+            }
+            Self::Greek => {
+                format!("Όλα τα στιγμιότυπα του {project} διαγράφονται οριστικά.")
+            }
+            Self::Hindi => format!("{project} के सभी स्नैपशॉट स्थायी रूप से हटा दिए जाते हैं।"),
+            Self::Chinese => format!("{project} 的所有快照将被永久删除。"),
+            Self::Swedish => {
+                format!("Alla ögonblicksbilder för {project} tas bort permanent.")
+            }
+        }
+    }
+
     pub fn project_details(self) -> &'static str {
         match self {
             Self::English => "Details",

@@ -7,6 +7,7 @@
 use localweb_core::{
     Cache, Database, ExecutionSpec, NewProject, Paths, Request, Response, SupervisorConfig,
     WebServer, copy,
+    database::SnapshotSelector,
     hosts::{HostsSync, HostsSyncLock},
     parse_cron_line, send_request, validate_php_version,
 };
@@ -21,6 +22,9 @@ use tokio::{process::Command, time::timeout};
 
 /// How long one daemon request may take before the tool reports a timeout.
 const DAEMON_TIMEOUT: Duration = Duration::from_secs(120);
+/// Reply budget for dumps, restores, exports, and imports. Large databases
+/// can legitimately take hours; the daemon enforces its own engine timeout.
+const DAEMON_DATABASE_TIMEOUT: Duration = Duration::from_hours(6);
 /// How long `localweb_daemon_start` waits for project restoration.
 const STARTUP_READY_TIMEOUT: Duration = Duration::from_secs(60);
 /// Default wall-clock limit for `localweb_project_exec`.
@@ -287,6 +291,137 @@ pub(crate) fn definitions() -> Value {
             },
         },
         {
+            "name": "localweb_database_snapshots",
+            "description": "List a project's database-only snapshots, newest first. Snapshots never include project files, PHP settings, cache, or mail.",
+            "inputSchema": {
+                "type": "object",
+                "properties": { "name": name_property },
+                "required": ["name"],
+            },
+        },
+        {
+            "name": "localweb_database_snapshot_create",
+            "description": "Create a database-only snapshot of a project's database. The optional name must be unique and use letters, digits, dots, underscores, or hyphens.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "name": name_property,
+                    "snapshot_name": {
+                        "type": "string",
+                        "description": "Unique display name; a timestamped name is generated when omitted",
+                    },
+                },
+                "required": ["name"],
+            },
+        },
+        {
+            "name": "localweb_database_snapshot_restore",
+            "description": "Replace a project's database with a snapshot. Verifies the checksum and engine version, then optionally verifies the restored database. A safety snapshot is created first by default. Requires confirm: true because current data is replaced.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "name": name_property,
+                    "snapshot": {
+                        "type": "string",
+                        "description": "Snapshot display name; omit with latest: true",
+                    },
+                    "latest": {
+                        "type": "boolean",
+                        "description": "Select the newest non-safety snapshot. Default: false",
+                    },
+                    "safety_snapshot": {
+                        "type": "boolean",
+                        "description": "Create a safety snapshot before restoring. Default: true",
+                    },
+                    "confirm": {
+                        "type": "boolean",
+                        "description": "Must be true to acknowledge that current database data is replaced",
+                    },
+                },
+                "required": ["name", "confirm"],
+            },
+        },
+        {
+            "name": "localweb_database_snapshot_delete",
+            "description": "Permanently delete one database snapshot. Requires confirm: true.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "name": name_property,
+                    "snapshot": {
+                        "type": "string",
+                        "description": "Snapshot display name or id",
+                    },
+                    "confirm": {
+                        "type": "boolean",
+                        "description": "Must be true to acknowledge the irreversible deletion",
+                    },
+                },
+                "required": ["name", "snapshot", "confirm"],
+            },
+        },
+        {
+            "name": "localweb_database_snapshot_cleanup",
+            "description": "Permanently delete every database snapshot of a project. Requires confirm: true.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "name": name_property,
+                    "confirm": {
+                        "type": "boolean",
+                        "description": "Must be true to acknowledge the irreversible deletion",
+                    },
+                },
+                "required": ["name", "confirm"],
+            },
+        },
+        {
+            "name": "localweb_database_export",
+            "description": "Export a project database as SQL. The destination must end in .sql, .sql.gz, or .sql.zst; the extension chooses compression. Existing files are not replaced unless overwrite is true.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "name": name_property,
+                    "destination": {
+                        "type": "string",
+                        "description": "Absolute destination path ending in .sql, .sql.gz, or .sql.zst",
+                    },
+                    "overwrite": {
+                        "type": "boolean",
+                        "description": "Replace an existing destination file. Default: false",
+                    },
+                },
+                "required": ["name", "destination"],
+            },
+        },
+        {
+            "name": "localweb_database_import",
+            "description": "Import a SQL dump into a project database. The dump is confined to the project database and checked before anything changes. Existing objects are dropped unless no_drop is true, and a safety snapshot is created first by default. Requires confirm: true.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "name": name_property,
+                    "source": {
+                        "type": "string",
+                        "description": "Absolute source path ending in .sql, .sql.gz, or .sql.zst",
+                    },
+                    "no_drop": {
+                        "type": "boolean",
+                        "description": "Keep existing objects instead of dropping them first. Default: false",
+                    },
+                    "safety_snapshot": {
+                        "type": "boolean",
+                        "description": "Create a safety snapshot before importing. Default: true",
+                    },
+                    "confirm": {
+                        "type": "boolean",
+                        "description": "Must be true to acknowledge that current database objects may be replaced",
+                    },
+                },
+                "required": ["name", "source", "confirm"],
+            },
+        },
+        {
             "name": "localweb_logs",
             "description": "List log files, or read the last lines of one file.",
             "inputSchema": {
@@ -327,6 +462,13 @@ pub(crate) async fn call(name: &str, arguments: &Value) -> Result<String, String
         "localweb_ca_install" => ca_install().await,
         "localweb_hosts_sync" => hosts_sync().await,
         "localweb_login_autostart" => login_autostart(arguments).await,
+        "localweb_database_snapshots" => database_snapshots(arguments).await,
+        "localweb_database_snapshot_create" => database_snapshot_create(arguments).await,
+        "localweb_database_snapshot_restore" => database_snapshot_restore(arguments).await,
+        "localweb_database_snapshot_delete" => database_snapshot_delete(arguments).await,
+        "localweb_database_snapshot_cleanup" => database_snapshot_cleanup(arguments).await,
+        "localweb_database_export" => database_export(arguments).await,
+        "localweb_database_import" => database_import(arguments).await,
         "localweb_logs" => logs(arguments).await,
         other => Err(format!("unknown tool: {other}")),
     }
@@ -773,6 +915,161 @@ async fn login_autostart(arguments: &Value) -> Result<String, String> {
     Ok(format!("LocalWeb login autostart {action}d"))
 }
 
+/// Sends one database request with the long engine budget.
+async fn database_daemon(request: Request) -> Result<Response, String> {
+    let paths = paths()?;
+    let response = timeout(DAEMON_DATABASE_TIMEOUT, send_request(&paths, request))
+        .await
+        .map_err(|_elapsed| {
+            "LocalWeb did not finish the database operation in time. The operation may still complete. Check localweb_database_snapshots and the project database before retrying."
+                .to_owned()
+        })?
+        .map_err(|error| format!("Can't reach LocalWeb ({error}). Check localweb_status before retrying."))?;
+    if let Response::Error { code, message } = &response {
+        return Err(format!("{code}: {message}"));
+    }
+    Ok(response)
+}
+
+/// Rejects destructive calls without an explicit acknowledgement.
+fn require_confirm(arguments: &Value) -> Result<(), String> {
+    if arguments.get("confirm").and_then(Value::as_bool) == Some(true) {
+        Ok(())
+    } else {
+        Err("This operation replaces or deletes data. Review the target, then pass \"confirm\": true.".to_owned())
+    }
+}
+
+/// Returns one absolute path argument.
+fn absolute_path(arguments: &Value, key: &str) -> Result<PathBuf, String> {
+    let value = required_string(arguments, key)?;
+    let path = PathBuf::from(&value);
+    if !path.is_absolute() {
+        return Err(format!("`{key}` must be an absolute path, got \"{value}\""));
+    }
+    Ok(path)
+}
+
+/// Lists a project's database-only snapshots.
+async fn database_snapshots(arguments: &Value) -> Result<String, String> {
+    let project = required_string(arguments, "name")?;
+    match database_daemon(Request::DatabaseSnapshotList { project }).await? {
+        Response::Snapshots(snapshots) => render(&snapshots),
+        _ => Err(unexpected()),
+    }
+}
+
+/// Creates one database-only snapshot.
+async fn database_snapshot_create(arguments: &Value) -> Result<String, String> {
+    let project = required_string(arguments, "name")?;
+    let name = optional_string(arguments, "snapshot_name").filter(|name| !name.trim().is_empty());
+    match database_daemon(Request::DatabaseSnapshotCreate { project, name }).await? {
+        Response::DatabaseOperation(result) => render(&result),
+        _ => Err(unexpected()),
+    }
+}
+
+/// Restores a snapshot after an explicit confirmation.
+async fn database_snapshot_restore(arguments: &Value) -> Result<String, String> {
+    require_confirm(arguments)?;
+    let project = required_string(arguments, "name")?;
+    let latest = optional_bool(arguments, "latest", false);
+    let snapshot = optional_string(arguments, "snapshot");
+    let selector = match (snapshot, latest) {
+        (Some(_), true) => {
+            return Err("pass either `snapshot` or `latest: true`, not both".to_owned());
+        }
+        (Some(name), false) => SnapshotSelector::from_cli(&name),
+        (None, true) => SnapshotSelector::Latest,
+        (None, false) => {
+            return Err("pass a snapshot display name or `latest: true`".to_owned());
+        }
+    };
+    let safety_snapshot = optional_bool(arguments, "safety_snapshot", true);
+    match database_daemon(Request::DatabaseSnapshotRestore {
+        project,
+        snapshot: selector,
+        safety_snapshot,
+        confirm: true,
+    })
+    .await?
+    {
+        Response::DatabaseOperation(result) => render(&result),
+        _ => Err(unexpected()),
+    }
+}
+
+/// Deletes one snapshot after an explicit confirmation.
+async fn database_snapshot_delete(arguments: &Value) -> Result<String, String> {
+    require_confirm(arguments)?;
+    let project = required_string(arguments, "name")?;
+    let snapshot = required_string(arguments, "snapshot")?;
+    match database_daemon(Request::DatabaseSnapshotDelete {
+        project,
+        snapshot: SnapshotSelector::from_cli(&snapshot),
+        confirm: true,
+    })
+    .await?
+    {
+        Response::DatabaseOperation(result) => render(&result),
+        _ => Err(unexpected()),
+    }
+}
+
+/// Deletes every snapshot of a project after an explicit confirmation.
+async fn database_snapshot_cleanup(arguments: &Value) -> Result<String, String> {
+    require_confirm(arguments)?;
+    let project = required_string(arguments, "name")?;
+    match database_daemon(Request::DatabaseSnapshotCleanup {
+        project,
+        confirm: true,
+    })
+    .await?
+    {
+        Response::DatabaseOperation(result) => render(&result),
+        _ => Err(unexpected()),
+    }
+}
+
+/// Exports a database as SQL, inferring compression from the extension.
+async fn database_export(arguments: &Value) -> Result<String, String> {
+    let project = required_string(arguments, "name")?;
+    let destination = absolute_path(arguments, "destination")?;
+    let overwrite = optional_bool(arguments, "overwrite", false);
+    match database_daemon(Request::DatabaseExport {
+        project,
+        destination,
+        compression: None,
+        overwrite,
+    })
+    .await?
+    {
+        Response::DatabaseOperation(result) => render(&result),
+        _ => Err(unexpected()),
+    }
+}
+
+/// Imports a SQL dump after an explicit confirmation.
+async fn database_import(arguments: &Value) -> Result<String, String> {
+    require_confirm(arguments)?;
+    let project = required_string(arguments, "name")?;
+    let source = absolute_path(arguments, "source")?;
+    let no_drop = optional_bool(arguments, "no_drop", false);
+    let safety_snapshot = optional_bool(arguments, "safety_snapshot", true);
+    match database_daemon(Request::DatabaseImport {
+        project,
+        source,
+        no_drop,
+        safety_snapshot,
+        confirm: true,
+    })
+    .await?
+    {
+        Response::DatabaseOperation(result) => render(&result),
+        _ => Err(unexpected()),
+    }
+}
+
 /// Lists log files or returns the tail of one of them.
 async fn logs(arguments: &Value) -> Result<String, String> {
     let paths = paths()?;
@@ -962,7 +1259,7 @@ mod tests {
     fn definitions_cover_every_documented_tool() {
         let tools = definitions();
         let tools = tools.as_array().expect("definitions is an array");
-        assert_eq!(tools.len(), 19);
+        assert_eq!(tools.len(), 26);
         for tool in tools {
             assert!(
                 tool["name"]
@@ -1015,6 +1312,16 @@ mod tests {
         let text = cap_output(&bytes);
         assert!(text.ends_with("(output truncated)"));
         assert!(text.len() <= OUTPUT_CAP + "\n… (output truncated)".len());
+    }
+
+    #[test]
+    fn destructive_database_tools_require_confirmation() {
+        require_confirm(&json!({ "confirm": true })).unwrap();
+        let error = require_confirm(&json!({})).unwrap_err();
+        assert!(error.contains("confirm"));
+        require_confirm(&json!({ "confirm": "yes" })).unwrap_err();
+        absolute_path(&json!({ "path": "relative.sql" }), "path").unwrap_err();
+        absolute_path(&json!({ "path": "/tmp/demo.sql" }), "path").unwrap();
     }
 
     #[test]

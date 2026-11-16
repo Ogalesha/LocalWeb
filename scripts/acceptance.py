@@ -13,6 +13,7 @@ import sys
 import tempfile
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 binary_dir = Path(sys.argv[1]).resolve()
@@ -62,6 +63,58 @@ def request(kind, data=None, allow_error=False):
 
 def helper(operation, data):
     subprocess.run(["sudo", "env", f"PKEXEC_UID={uid}", str(binary_dir / "localweb-helper"), operation], input=data, check=True)
+
+
+def cli(*args, allow_error=False, timeout=600):
+    result = subprocess.run(
+        [str(binary_dir / "localweb"), *args],
+        env=env,
+        text=True,
+        capture_output=True,
+        timeout=timeout,
+    )
+    if not allow_error:
+        assert result.returncode == 0, (args, result.stdout, result.stderr)
+    return result
+
+
+def snapshot_names(project):
+    payload = json.loads(cli("db", "snapshot", "list", project, "--json").stdout)
+    items = payload.get("data", payload)
+    return [item["name"] for item in items]
+
+
+def php_literal(value):
+    return "'" + value.replace("\\", "\\\\").replace("'", "\\'") + "'"
+
+
+def database_php(values, driver):
+    if driver == "sqlite":
+        dsn = "sqlite:" + values["DB_DATABASE"]
+        credentials = ""
+    else:
+        dsn = f"{driver}:host={values['DB_HOST']};port={values['DB_PORT']};dbname={values['DB_DATABASE']}"
+        credentials = f", {php_literal(values['DB_USERNAME'])}, {php_literal(values['DB_PASSWORD'])}"
+    return f"""<?php
+header('Content-Type: text/plain');
+$pdo = new PDO({php_literal(dsn)}{credentials}, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+$op = $_GET['op'] ?? 'read';
+if ($op === 'init') {{
+    $pdo->exec('DROP TABLE IF EXISTS marker');
+    $pdo->exec('CREATE TABLE marker (id INTEGER PRIMARY KEY, marker_value TEXT NOT NULL)');
+    $stmt = $pdo->prepare('INSERT INTO marker (id, marker_value) VALUES (1, ?)');
+    $stmt->execute([$_GET['value'] ?? '']);
+    echo 'initialized';
+}} elseif ($op === 'set') {{
+    $stmt = $pdo->prepare('UPDATE marker SET marker_value = ? WHERE id = 1');
+    $stmt->execute([$_GET['value'] ?? '']);
+    echo 'updated';
+}} elseif ($op === 'count') {{
+    echo $pdo->query('SELECT count(*) FROM marker')->fetchColumn();
+}} else {{
+    echo $pdo->query('SELECT marker_value FROM marker WHERE id = 1')->fetchColumn();
+}}
+"""
 
 
 def mcp_call(process, payload):
@@ -297,6 +350,85 @@ try:
                 request("project_remove", {"name": name})
                 assert (path / "index.php").is_file(), "Removal touched source files"
                 print(f"PASS {name}: HTTPS, PDO, Redis, Mailpit, CLI, stop/remove", flush=True)
+    # Database-only snapshots, export, and import must stay inside one project
+    # and one engine. Two projects per engine prove A/B isolation.
+    for engine in ("mariadb", "mysql", "postgres", "sqlite"):
+        driver = "sqlite" if engine == "sqlite" else ("pgsql" if engine == "postgres" else "mysql")
+        projects = {}
+        for label in ("a", "b"):
+            name = f"db-{label}-{engine}"
+            path = base / name
+            path.mkdir()
+            spec = {"path": str(path), "name": name, "hostname": f"{name}.test", "document_root": ".", "profile": "genericphp", "web_server": "nginx", "php": "8.5", "composer": "2", "node": "24", "database": engine, "cache": "none", "supervisor": {"enabled": False, "command": []}, "cron": [], "cron_preset": False, "mail": False, "autostart": False}
+            request("project_add", spec)
+            values = request("project_environment", {"name": name})
+            (path / "db.php").write_text(database_php(values, driver), encoding="utf-8")
+            request("project_start", {"name": name})
+            projects[label] = (name, values)
+        name_a, _ = projects["a"]
+        name_b, _ = projects["b"]
+
+        def db(project, op, value=""):
+            suffix = f"&value={urllib.parse.quote(value)}" if op in ("init", "set") else ""
+            return fetch(f"https://{project}.test/db.php?op={op}{suffix}")
+
+        assert db(name_a, "init", "alpha") == "initialized"
+        assert db(name_b, "init", "bravo") == "initialized"
+        assert db(name_a, "read") == "alpha"
+        assert db(name_b, "read") == "bravo"
+
+        cli("db", "snapshot", "create", name_a, "--name", "baseline", "--json")
+        names = snapshot_names(name_a)
+        assert names == ["baseline"], names
+        assert snapshot_names(name_b) == [], "snapshots leaked between projects"
+        assert db(name_a, "set", "changed") == "updated"
+        cli("db", "snapshot", "restore", name_a, "--latest", "--yes", "--json")
+        assert db(name_a, "read") == "alpha", f"{engine} restore did not replace data"
+        assert db(name_b, "read") == "bravo", f"{engine} restore touched another project"
+        names = snapshot_names(name_a)
+        assert "baseline" in names and any("safety" in name for name in names), names
+        assert snapshot_names(name_b) == [], "restore leaked snapshots between projects"
+
+        for suffix in ("sql", "sql.gz", "sql.zst"):
+            destination = base / f"{engine}-export.{suffix}"
+            cli("db", "export", name_a, str(destination), "--json")
+            assert destination.is_file() and destination.stat().st_size > 0
+            assert db(name_a, "set", "mutated-" + suffix) == "updated"
+            cli("db", "import", name_a, str(destination), "--yes", "--json")
+            assert db(name_a, "read") == "alpha", f"{engine} {suffix} import lost data"
+            assert db(name_b, "read") == "bravo", f"{engine} {suffix} import touched another project"
+            repeated = cli("db", "export", name_a, str(destination), allow_error=True)
+            assert repeated.returncode != 0 and "already exists" in repeated.stderr, repeated
+
+        cli("db", "snapshot", "create", name_a, "--name", "temporary", "--json")
+        cli("db", "snapshot", "delete", name_a, "temporary", "--yes", "--json")
+        assert "temporary" not in snapshot_names(name_a)
+        cli("db", "snapshot", "cleanup", name_a, "--yes", "--json")
+        assert snapshot_names(name_a) == []
+        assert db(name_b, "read") == "bravo"
+
+        if engine == "mariadb":
+            first = subprocess.Popen([str(binary_dir / "localweb"), "db", "snapshot", "create", name_a, "--name", "parallel-one", "--json"], env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            second = subprocess.Popen([str(binary_dir / "localweb"), "db", "snapshot", "create", name_a, "--name", "parallel-two", "--json"], env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            for process in (first, second):
+                stdout, stderr = process.communicate(timeout=600)
+                assert process.returncode == 0, (stdout, stderr)
+            assert sorted(snapshot_names(name_a)) == ["parallel-one", "parallel-two"]
+            snapshots_root = base / "data/localweb/databases/snapshots"
+            project_id = request("project_get", {"name": name_a})["project"]["id"].replace("-", "")
+            payloads = list((snapshots_root / project_id).glob("*/database.sql.zst"))
+            assert len(payloads) == 2, payloads
+            for payload in payloads:
+                payload.write_bytes(b"truncated")
+            corrupted = snapshot_names(name_a)
+            assert "parallel-one" not in corrupted and "parallel-two" not in corrupted, "corrupt snapshot was listed"
+            cli("db", "snapshot", "cleanup", name_a, "--yes", "--json")
+
+        for project in (name_a, name_b):
+            request("project_stop", {"name": project})
+            request("project_remove", {"name": project})
+        print(f"PASS database {engine}: A/B isolation, snapshots, restore, SQL export/import", flush=True)
+
     # These fault tests run only on the disposable native CI host.
     fault_projects = []
     for name in ("fault-one", "fault-two"):

@@ -57,14 +57,14 @@ const REDIS_PORT_START: u16 = 40_000;
 const REDIS_PORT_END: u16 = 49_999;
 
 #[derive(Serialize, Deserialize)]
-struct ProjectSecrets {
-    schema_version: u32,
-    database_name: String,
-    database_user: String,
-    database_password: String,
-    redis_port: Option<u16>,
+pub(crate) struct ProjectSecrets {
+    pub(crate) schema_version: u32,
+    pub(crate) database_name: String,
+    pub(crate) database_user: String,
+    pub(crate) database_password: String,
+    pub(crate) redis_port: Option<u16>,
     #[serde(default)]
-    mail_smtp_port: Option<u16>,
+    pub(crate) mail_smtp_port: Option<u16>,
 }
 
 pub struct Services<'a> {
@@ -1229,7 +1229,7 @@ impl Services<'_> {
         Ok(values)
     }
 
-    fn project_secrets(&self, project: &Project) -> Result<ProjectSecrets> {
+    pub(crate) fn project_secrets(&self, project: &Project) -> Result<ProjectSecrets> {
         // Environment requests and startup run on different daemon tasks.
         // Serialize read/allocate/write so neither credentials nor port
         // reservations can be overwritten by a concurrent request.

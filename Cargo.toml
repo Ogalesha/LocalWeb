@@ -18,6 +18,7 @@ bytes = "1"
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4", features = ["derive"] }
 eframe = { version = "0.35", default-features = false, features = ["accesskit", "default_fonts", "glow", "wayland", "x11"] }
+flate2 = "1.1"
 http-body-util = "0.1"
 hyper = { version = "1", features = ["full"] }
 image = { version = "0.25", default-features = false, features = ["png"] }
@@ -28,9 +29,11 @@ mimalloc = "0.1"
 pem = "3"
 rcgen = { version = "0.13", features = ["x509-parser"] }
 rustls = { version = "0.23.46", default-features = false, features = ["ring", "std", "tls12"] }
+rusqlite = { version = "0.43", features = ["backup", "bundled"] }
 rustls-pemfile = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+sha2 = "0.11"
 thiserror = "2"
 tokio = { version = "1.54.1", features = ["full"] }
 tray-icon = { version = "0.26.1", default-features = false, features = ["ksni"] }
@@ -40,6 +43,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 x509-parser = { version = "0.16", features = ["verify"] }
+zstd = "0.14"
 
 [workspace.lints.rust]
 ambiguous_negative_literals = "warn"

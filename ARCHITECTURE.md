@@ -63,6 +63,16 @@ Privileged integration changes share a system-wide lock. Failed Linux trust-stor
 
 Rolling downloads are published by a separate, serialized workflow after native acceptance succeeds. The publisher stages and verifies all assets, retains the previous bundle, and records recovery metadata before promotion. GitHub does not offer an atomic multi-asset swap: a brief mixed-version window remains possible during promotion; interrupted promotions are recovered from the journal before the next publication.
 
+## Database management
+
+Database snapshots, SQL export and SQL import are daemon requests. They take a per-project asynchronous lock instead of the daemon-wide operation lock, so a long dump or restore does not block the GUI, the daemon or another project. Blocking engine and filesystem work runs on Tokio's blocking pool, and engine child processes are killed after the four-hour operation budget.
+
+MariaDB, MySQL and PostgreSQL snapshots are plain SQL dumps produced by `mariadb-dump`/`mysqldump` or `pg_dump`; SQLite snapshots use the SQLite online backup API. Every snapshot payload is Zstandard-compressed. Snapshots live under the platform data directory at `databases/snapshots/<project-id>/<snapshot-id>/` with `metadata.json` and one payload: `~/.local/share/localweb/` on Ubuntu, Arch/Omarchy and macOS, and `%LOCALAPPDATA%\LocalWeb\data\` on Windows. On Unix directories are `0700` and files are `0600`; on Windows the per-user `%LOCALAPPDATA%` ACL applies. A completed snapshot is published with an atomic rename, so interrupted work is never listed. Listing checks that the payload is a regular file of the recorded size; restore verifies the SHA-256 checksum.
+
+Export and import use the same runtime engine tools and the project's generated application credentials, never the shared administrator credentials. Temporary credential files are `0600` and are removed on drop. Export streams through a private temporary file and publishes it without overwriting an existing destination unless explicitly allowed. Import reads, decompresses and validates the SQL before dropping objects or creating a safety snapshot. The SQL scanner understands quoting, comments, dollar-quoted bodies and PostgreSQL `COPY ... FROM stdin` data, and rejects cross-database, administrator, shell and file-access statements. Compressed inputs are capped at 64 GiB and at a 500:1 expansion ratio above a 64 MiB floor.
+
+Restore additionally checks the snapshot engine and major version, creates a safety snapshot by default, and verifies the database after replacement. PostgreSQL imports use `psql --single-transaction`; MySQL and MariaDB DDL is not atomic, and SQLite SQL imports are not wrapped in a forced transaction, so the reported safety snapshot is the recovery path. Project update and removal take the same per-project database lock before the daemon-wide operation lock.
+
 ## Tool shims
 
 `localweb integration install` writes `php`, `composer`, `node`, `npm` and `npx` entries into a shim directory inside the LocalWeb data directory, then publishes that directory first on the login shell `PATH` through one delimited block in the shell startup file. Windows writes `.cmd` shims that call the hidden `localweb shim <tool> --` entry point and adds the directory to the user `PATH`; no other registry value changes.

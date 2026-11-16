@@ -52,6 +52,7 @@ const fn default_gateway_bind_address() -> Ipv4Addr {
 }
 
 mod backend;
+mod database;
 mod proxy;
 mod services;
 use proxy::DbProxy;
@@ -216,6 +217,7 @@ struct State {
     operations: Mutex<DaemonPhase>,
     ready: AtomicBool,
     db_proxies: Mutex<BTreeMap<String, DbProxy>>,
+    database_locks: Mutex<BTreeMap<String, std::sync::Arc<tokio::sync::Mutex<()>>>>,
     cron_jobs: Mutex<BTreeMap<(String, usize), tokio::task::JoinHandle<()>>>,
     cron_last_minute: Mutex<BTreeMap<(String, usize), i64>>,
     /// A committed project mutation could not rewrite the derived gateway
@@ -278,6 +280,7 @@ async fn main() -> Result<()> {
         db_proxies: Mutex::new(BTreeMap::new()),
         cron_jobs: Mutex::new(BTreeMap::new()),
         cron_last_minute: Mutex::new(BTreeMap::new()),
+        database_locks: Mutex::new(BTreeMap::new()),
         routes_dirty: AtomicBool::new(false),
         shutdown: watch::channel(false).0,
     });
@@ -601,6 +604,10 @@ async fn execute(request: Request, state: &Arc<State>) -> localweb_core::Result<
         }
         Request::ProjectUpdate { name, input }
         | Request::ProjectUpdateIfCurrent { name, input, .. } => {
+            // A long dump or restore must finish before its database
+            // configuration can be replaced or its project removed.
+            let database_lock = database::lock_project(state, &name).await;
+            let _database_guard = database_lock.lock().await;
             let _operations = state.begin_operation().await?;
             let existing = find_project(&state.paths, &name)?;
             if expected_project
@@ -691,6 +698,8 @@ async fn execute(request: Request, state: &Arc<State>) -> localweb_core::Result<
             }))
         }
         Request::ProjectRemove { name } => {
+            let database_lock = database::lock_project(state, &name).await;
+            let _database_guard = database_lock.lock().await;
             let _operations = state.begin_operation().await?;
             let project = find_project(&state.paths, &name)?;
             let was_running = state.running.lock().await.contains(&name);
@@ -733,6 +742,13 @@ async fn execute(request: Request, state: &Arc<State>) -> localweb_core::Result<
             };
             Ok(Response::Environment(services.environment(&project)?))
         }
+        request @ (Request::DatabaseSnapshotCreate { .. }
+        | Request::DatabaseSnapshotList { .. }
+        | Request::DatabaseSnapshotRestore { .. }
+        | Request::DatabaseSnapshotDelete { .. }
+        | Request::DatabaseSnapshotCleanup { .. }
+        | Request::DatabaseExport { .. }
+        | Request::DatabaseImport { .. }) => database::execute(request, state).await,
         Request::RuntimeList => Ok(Response::Diagnostics(runtime_diagnostics())),
         Request::ResolveExecution { name } => {
             let _operations = state.begin_operation().await?;
@@ -2693,6 +2709,7 @@ mod tests {
             operations: Mutex::new(DaemonPhase::Serving),
             ready: AtomicBool::new(true),
             db_proxies: Mutex::new(BTreeMap::new()),
+            database_locks: Mutex::new(BTreeMap::new()),
             cron_jobs: Mutex::new(BTreeMap::new()),
             cron_last_minute: Mutex::new(BTreeMap::new()),
             routes_dirty: AtomicBool::new(false),
@@ -2726,6 +2743,7 @@ mod tests {
             operations: Mutex::new(DaemonPhase::Serving),
             ready: AtomicBool::new(true),
             db_proxies: Mutex::new(BTreeMap::new()),
+            database_locks: Mutex::new(BTreeMap::new()),
             cron_jobs: Mutex::new(BTreeMap::new()),
             cron_last_minute: Mutex::new(BTreeMap::new()),
             routes_dirty: AtomicBool::new(false),
@@ -2918,6 +2936,7 @@ mod tests {
             operations: Mutex::new(DaemonPhase::Serving),
             ready: AtomicBool::new(true),
             db_proxies: Mutex::new(BTreeMap::new()),
+            database_locks: Mutex::new(BTreeMap::new()),
             cron_jobs: Mutex::new(BTreeMap::new()),
             cron_last_minute: Mutex::new(BTreeMap::new()),
             routes_dirty: AtomicBool::new(false),
@@ -2946,6 +2965,7 @@ mod tests {
             operations: Mutex::new(DaemonPhase::Restoring),
             ready: AtomicBool::new(false),
             db_proxies: Mutex::new(BTreeMap::new()),
+            database_locks: Mutex::new(BTreeMap::new()),
             cron_jobs: Mutex::new(BTreeMap::new()),
             cron_last_minute: Mutex::new(BTreeMap::new()),
             routes_dirty: AtomicBool::new(false),
@@ -2985,6 +3005,7 @@ mod tests {
             operations: Mutex::new(DaemonPhase::Serving),
             ready: AtomicBool::new(true),
             db_proxies: Mutex::new(BTreeMap::new()),
+            database_locks: Mutex::new(BTreeMap::new()),
             cron_jobs: Mutex::new(BTreeMap::new()),
             cron_last_minute: Mutex::new(BTreeMap::new()),
             routes_dirty: AtomicBool::new(false),

@@ -11,8 +11,9 @@ use icons::Icon;
 use lang::Lang;
 use localweb_core::{
     CaStatus, Cache, Database, GlobalConfig, NewProject, Paths, Profile, Project, ProjectStatus,
-    Request, Response, Status, SupervisorConfig, WebServer, default_supervisor_command,
-    detect_profile, sanitize_name, send_request,
+    Request, Response, Status, SupervisorConfig, WebServer,
+    database::{DatabaseOperationResult, DatabaseSnapshot, SnapshotSelector},
+    default_supervisor_command, detect_profile, sanitize_name, send_request,
 };
 use std::{
     collections::BTreeMap,
@@ -56,6 +57,10 @@ const IDLE_REPAINT_INTERVAL: Duration = Duration::from_millis(250);
 const DAEMON_REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
 /// Reply budget for background refreshes that must not block the UI.
 const DAEMON_BACKGROUND_TIMEOUT: Duration = Duration::from_secs(5);
+/// Reply budget for database dumps, restores, exports, and imports. Large
+/// databases can legitimately run for hours; the daemon enforces its own
+/// engine-level timeout.
+const DAEMON_DATABASE_TIMEOUT: Duration = Duration::from_hours(6);
 
 fn main() -> eframe::Result {
     let placement = Paths::discover()
@@ -271,6 +276,13 @@ enum Action {
     RestartProject,
     RemoveProject,
     LoadEnvironment(String),
+    LoadSnapshots(String),
+    DatabaseCreate(String),
+    DatabaseRestore(String),
+    DatabaseDelete(String),
+    DatabaseCleanup(String),
+    DatabaseExport(String),
+    DatabaseImport(String),
 }
 
 impl Action {
@@ -280,15 +292,89 @@ impl Action {
             Self::LoadProjects => requests::Query::Projects,
             Self::LoadCa => requests::Query::Certificate,
             Self::LoadEnvironment(name) => requests::Query::Environment(name.clone()),
+            Self::LoadSnapshots(name) => requests::Query::Snapshots(name.clone()),
             _ => return None,
         })
     }
+
     fn background(&self) -> bool {
         matches!(
             self,
-            Self::RefreshStatus | Self::LoadProjects | Self::LoadCa | Self::LoadEnvironment(_)
+            Self::RefreshStatus
+                | Self::LoadProjects
+                | Self::LoadCa
+                | Self::LoadEnvironment(_)
+                | Self::LoadSnapshots(_)
         )
     }
+
+    /// Engine work may outlive the ordinary interactive reply budget.
+    fn database(&self) -> bool {
+        matches!(
+            self,
+            Self::DatabaseCreate(_)
+                | Self::DatabaseRestore(_)
+                | Self::DatabaseDelete(_)
+                | Self::DatabaseCleanup(_)
+                | Self::DatabaseExport(_)
+                | Self::DatabaseImport(_)
+        )
+    }
+
+    fn timeout(&self) -> Duration {
+        if self.database() {
+            DAEMON_DATABASE_TIMEOUT
+        } else if self.background() {
+            DAEMON_BACKGROUND_TIMEOUT
+        } else {
+            DAEMON_REQUEST_TIMEOUT
+        }
+    }
+
+    /// Project owning a database operation, used to refresh its snapshot list.
+    fn database_project(&self) -> Option<&str> {
+        match self {
+            Self::DatabaseCreate(name)
+            | Self::DatabaseRestore(name)
+            | Self::DatabaseDelete(name)
+            | Self::DatabaseCleanup(name)
+            | Self::DatabaseExport(name)
+            | Self::DatabaseImport(name) => Some(name),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Clone)]
+enum DatabaseConfirm {
+    Restore {
+        project: String,
+        name: String,
+        selector: SnapshotSelector,
+    },
+    Delete {
+        project: String,
+        name: String,
+        selector: SnapshotSelector,
+    },
+    Cleanup {
+        project: String,
+    },
+}
+
+#[derive(Clone)]
+enum DatabaseDialog {
+    Export {
+        project: String,
+        path: String,
+        force: bool,
+    },
+    Import {
+        project: String,
+        path: String,
+        no_drop: bool,
+        safety: bool,
+    },
 }
 
 enum GuiEvent {
@@ -333,6 +419,16 @@ struct LocalWebApp {
     details: Option<String>,
     environment: Option<BTreeMap<String, String>>,
     environment_error: Option<String>,
+    database_for: Option<String>,
+    database_snapshots: Vec<DatabaseSnapshot>,
+    database_loaded: bool,
+    database_loading: bool,
+    database_error: Option<String>,
+    database_name: String,
+    database_safety: bool,
+    database_dialog: Option<DatabaseDialog>,
+    database_dialog_error: Option<String>,
+    database_confirm: Option<DatabaseConfirm>,
     notice: Option<Notice>,
     requests: requests::Requests,
     project_transition: Option<(String, ProjectTransition)>,
@@ -394,6 +490,16 @@ impl LocalWebApp {
             details: None,
             environment: None,
             environment_error: None,
+            database_for: None,
+            database_snapshots: Vec::new(),
+            database_loaded: false,
+            database_loading: false,
+            database_error: None,
+            database_name: String::new(),
+            database_safety: true,
+            database_dialog: None,
+            database_dialog_error: None,
+            database_confirm: None,
             notice,
             requests: requests::Requests::default(),
             project_transition: None,
@@ -429,6 +535,7 @@ impl LocalWebApp {
             return;
         };
         let ticket = self.requests.begin(action.query());
+        let reply_timeout = action.timeout();
         let sender = self.sender.clone();
         thread::spawn(move || {
             let result = tokio::runtime::Builder::new_current_thread()
@@ -437,11 +544,6 @@ impl LocalWebApp {
                 .map_err(|error| error.to_string())
                 .and_then(|runtime| {
                     runtime.block_on(async {
-                        let reply_timeout = if action.background() {
-                            DAEMON_BACKGROUND_TIMEOUT
-                        } else {
-                            DAEMON_REQUEST_TIMEOUT
-                        };
                         tokio::time::timeout(reply_timeout, send_request(&paths, request))
                             .await
                             .map_err(|_elapsed| {
@@ -536,6 +638,25 @@ impl LocalWebApp {
                     Action::LoadEnvironment(name) if self.details.as_ref() == Some(&name) => {
                         self.environment_error = Some(error);
                     }
+                    Action::LoadSnapshots(name) => {
+                        self.database_loading = false;
+                        self.database_loaded = true;
+                        if self.database_for.as_deref() == Some(&name) {
+                            self.database_error = Some(error);
+                        } else {
+                            self.notice = Some(Notice::error(error));
+                        }
+                    }
+                    Action::DatabaseCreate(_)
+                    | Action::DatabaseRestore(_)
+                    | Action::DatabaseDelete(_)
+                    | Action::DatabaseCleanup(_)
+                    | Action::DatabaseExport(_)
+                    | Action::DatabaseImport(_) => {
+                        self.database_loading = false;
+                        self.database_error = Some(error.clone());
+                        self.notice = Some(Notice::error(error));
+                    }
                     Action::UpdateProject(_) if self.view == View::EditProject => {
                         self.form.error = Some(error);
                     }
@@ -565,6 +686,25 @@ impl LocalWebApp {
                 Action::LoadCa => self.ca_error = Some(error),
                 Action::LoadEnvironment(name) if self.details.as_ref() == Some(&name) => {
                     self.environment_error = Some(error);
+                }
+                Action::LoadSnapshots(name) => {
+                    self.database_loading = false;
+                    self.database_loaded = true;
+                    if self.database_for.as_deref() == Some(&name) {
+                        self.database_error = Some(error);
+                    } else {
+                        self.notice = Some(Notice::error(error));
+                    }
+                }
+                Action::DatabaseCreate(_)
+                | Action::DatabaseRestore(_)
+                | Action::DatabaseDelete(_)
+                | Action::DatabaseCleanup(_)
+                | Action::DatabaseExport(_)
+                | Action::DatabaseImport(_) => {
+                    self.database_loading = false;
+                    self.database_error = Some(error.clone());
+                    self.notice = Some(Notice::error(error));
                 }
                 Action::UpdateProject(_) if self.view == View::EditProject => {
                     self.form.error = Some(error);
@@ -610,6 +750,33 @@ impl LocalWebApp {
                 if self.details.as_ref() == Some(&name) {
                     self.environment = Some(values);
                     self.environment_error = None;
+                }
+            }
+            (Action::LoadSnapshots(name), Response::Snapshots(snapshots)) => {
+                self.database_loading = false;
+                self.database_loaded = true;
+                if self.database_for.as_deref() == Some(&name) {
+                    self.database_snapshots = snapshots;
+                    self.database_error = None;
+                }
+            }
+            (action, Response::DatabaseOperation(result)) => {
+                if let Some(name) = action.database_project().map(str::to_owned) {
+                    if matches!(action, Action::DatabaseCreate(_)) {
+                        self.database_name.clear();
+                    }
+                    self.database_dialog = None;
+                    self.database_dialog_error = None;
+                    self.database_confirm = None;
+                    self.database_error = None;
+                    self.notice = Some(Notice::success(database_result_message(&result)));
+                    if self.database_for.as_deref() == Some(&name) {
+                        self.load_snapshots(&name);
+                    }
+                } else {
+                    self.notice = Some(Notice::error(
+                        self.lang.notice_unexpected(&format!("{result:?}")),
+                    ));
                 }
             }
             (Action::Shutdown, Response::Message(_)) => {
@@ -1870,10 +2037,18 @@ impl LocalWebApp {
         if details.clicked() {
             if expanded {
                 self.details = None;
+                self.database_for = None;
+                self.database_dialog = None;
+                self.database_dialog_error = None;
+                self.database_confirm = None;
             } else {
                 self.details = Some(item.project.name.clone());
                 self.environment = None;
                 self.environment_error = None;
+                self.database_for = None;
+                self.database_dialog = None;
+                self.database_dialog_error = None;
+                self.database_confirm = None;
             }
         }
     }
@@ -2172,7 +2347,608 @@ impl LocalWebApp {
                 self.environment_error = None;
             }
         }
+        self.database_section(ui, project);
         ui.add_space(6.0);
+    }
+
+    fn prepare_database_panel(&mut self, project: &Project) {
+        self.database_for = Some(project.name.clone());
+        self.database_snapshots.clear();
+        self.database_loaded = false;
+        self.database_loading = false;
+        self.database_error = None;
+        self.database_name.clear();
+        self.database_safety = true;
+        self.database_dialog = None;
+        self.database_dialog_error = None;
+        self.database_confirm = None;
+        if project.database != Database::None && self.daemon_online() {
+            self.load_snapshots(&project.name);
+        }
+    }
+
+    fn load_snapshots(&mut self, name: &str) {
+        self.database_loading = true;
+        self.database_error = None;
+        self.request(
+            Action::LoadSnapshots(name.to_owned()),
+            Request::DatabaseSnapshotList {
+                project: name.to_owned(),
+            },
+        );
+    }
+
+    #[expect(
+        clippy::too_many_lines,
+        reason = "the snapshot table and its actions read as one panel"
+    )]
+    fn database_section(&mut self, ui: &mut egui::Ui, project: &Project) {
+        let lang = self.lang;
+        ui.add_space(10.0);
+        ui.separator();
+        ui.add_space(10.0);
+        ui.horizontal(|ui| {
+            ui.label(
+                strong(lang.database_management())
+                    .size(SECTION_TITLE_SIZE)
+                    .color(INK),
+            );
+            if project.database != Database::None {
+                ui.label(
+                    RichText::new(lang.database_name(project.database))
+                        .size(SMALL_SIZE)
+                        .color(INK_MUTED),
+                );
+            }
+        });
+        if project.database == Database::None {
+            ui.add(
+                egui::Label::new(
+                    RichText::new(lang.database_unavailable())
+                        .size(SMALL_SIZE)
+                        .color(INK_MUTED),
+                )
+                .wrap(),
+            );
+            return;
+        }
+        if self.database_for.as_deref() != Some(&project.name) {
+            self.prepare_database_panel(project);
+        }
+        if self.daemon_online()
+            && !self.database_loaded
+            && !self.database_loading
+            && self.database_error.is_none()
+        {
+            self.load_snapshots(&project.name);
+        }
+        let enabled = self.daemon_online() && self.requests.foreground_pending() == 0;
+        ui.add_space(8.0);
+        ui.horizontal(|ui| {
+            let label = form_label(ui, lang.database_snapshot_name());
+            let width = (ui.available_width() - 330.0).clamp(150.0, 320.0);
+            single_line_field(ui, &mut self.database_name, width, "before-update")
+                .labelled_by(label.id);
+            if Pill::new(lang.database_create_snapshot(), PillKind::Primary)
+                .icon(Icon::Plus)
+                .height(36.0)
+                .enabled(enabled)
+                .show(ui)
+                .clicked()
+            {
+                let name = self.database_name.trim();
+                let requested = (!name.is_empty()).then(|| name.to_owned());
+                self.database_name.clear();
+                self.database_error = None;
+                self.request(
+                    Action::DatabaseCreate(project.name.clone()),
+                    Request::DatabaseSnapshotCreate {
+                        project: project.name.clone(),
+                        name: requested,
+                    },
+                );
+            }
+        });
+        ui.add_space(6.0);
+        ui.horizontal(|ui| {
+            if Pill::new(lang.database_refresh(), PillKind::Ghost)
+                .icon(Icon::Refresh)
+                .height(32.0)
+                .enabled(enabled && !self.database_loading)
+                .show(ui)
+                .clicked()
+            {
+                self.load_snapshots(&project.name);
+            }
+            if Pill::new(lang.database_export(), PillKind::Secondary)
+                .icon(Icon::Download)
+                .height(32.0)
+                .enabled(enabled)
+                .show(ui)
+                .clicked()
+            {
+                self.database_dialog_error = None;
+                self.database_dialog = Some(DatabaseDialog::Export {
+                    project: project.name.clone(),
+                    path: default_export_path(&project.name),
+                    force: false,
+                });
+            }
+            if Pill::new(lang.database_import(), PillKind::Secondary)
+                .icon(Icon::Folder)
+                .height(32.0)
+                .enabled(enabled)
+                .show(ui)
+                .clicked()
+            {
+                self.database_dialog_error = None;
+                self.database_dialog = Some(DatabaseDialog::Import {
+                    project: project.name.clone(),
+                    path: String::new(),
+                    no_drop: false,
+                    safety: self.database_safety,
+                });
+            }
+            if Pill::new(lang.database_cleanup(), PillKind::GhostDanger)
+                .icon(Icon::Trash)
+                .height(32.0)
+                .enabled(enabled && !self.database_snapshots.is_empty())
+                .show(ui)
+                .clicked()
+            {
+                self.database_confirm = Some(DatabaseConfirm::Cleanup {
+                    project: project.name.clone(),
+                });
+            }
+            if self.database_loading || self.requests.foreground_pending() > 0 {
+                ui.spinner();
+                ui.label(
+                    RichText::new(if self.database_loading {
+                        lang.database_loading()
+                    } else {
+                        lang.database_busy()
+                    })
+                    .size(SMALL_SIZE)
+                    .color(INK_MUTED),
+                );
+            }
+        });
+        if let Some(error) = &self.database_error {
+            ui.add_space(6.0);
+            callout(ui, CalloutKind::Danger, Icon::Warning, |ui| {
+                ui.vertical(|ui| {
+                    ui.label(strong(lang.database_load_failed()).color(DANGER));
+                    ui.add(
+                        egui::Label::new(RichText::new(error).size(SMALL_SIZE).color(INK_MUTED))
+                            .wrap(),
+                    );
+                });
+            });
+        }
+        ui.add_space(6.0);
+        ui.label(
+            strong(lang.database_snapshots())
+                .size(LABEL_SIZE)
+                .color(INK),
+        );
+        let snapshots = self.database_snapshots.clone();
+        if snapshots.is_empty() {
+            if self.database_loaded {
+                ui.label(
+                    RichText::new(lang.database_empty())
+                        .size(SMALL_SIZE)
+                        .color(INK_MUTED),
+                );
+            }
+            return;
+        }
+        egui::Grid::new(("database-snapshots", &project.name))
+            .num_columns(4)
+            .spacing([18.0, 8.0])
+            .striped(true)
+            .show(ui, |ui| {
+                for heading in [
+                    lang.database_snapshot_column(),
+                    lang.database_created_column(),
+                    lang.database_size_column(),
+                    lang.database_actions_column(),
+                ] {
+                    ui.label(strong(heading).size(SMALL_SIZE).color(INK_MUTED));
+                }
+                ui.end_row();
+                for snapshot in &snapshots {
+                    ui.vertical(|ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(medium(truncate_middle(&snapshot.name, 36)).color(INK))
+                                .on_hover_text(&snapshot.name);
+                            if snapshot.safety {
+                                ui.label(
+                                    RichText::new(lang.database_safety_tag())
+                                        .size(SMALL_SIZE)
+                                        .color(WARNING),
+                                );
+                            }
+                        });
+                        ui.label(
+                            RichText::new(format!(
+                                "{:?} {}",
+                                snapshot.engine, snapshot.engine_version
+                            ))
+                            .size(SMALL_SIZE)
+                            .color(INK_MUTED),
+                        );
+                    });
+                    ui.label(
+                        RichText::new(snapshot.created_at.format("%Y-%m-%d %H:%M").to_string())
+                            .size(SMALL_SIZE)
+                            .color(INK_MUTED),
+                    );
+                    ui.label(
+                        RichText::new(human_size(snapshot.size_bytes))
+                            .size(SMALL_SIZE)
+                            .color(INK_MUTED),
+                    );
+                    ui.horizontal(|ui| {
+                        if Pill::new(lang.database_restore(), PillKind::Secondary)
+                            .height(30.0)
+                            .enabled(enabled)
+                            .show(ui)
+                            .clicked()
+                        {
+                            self.database_safety = true;
+                            self.database_confirm = Some(DatabaseConfirm::Restore {
+                                project: project.name.clone(),
+                                name: snapshot.name.clone(),
+                                selector: SnapshotSelector::Name(snapshot.name.clone()),
+                            });
+                        }
+                        if Pill::new(lang.action_delete(), PillKind::GhostDanger)
+                            .icon(Icon::Trash)
+                            .height(30.0)
+                            .enabled(enabled)
+                            .show(ui)
+                            .clicked()
+                        {
+                            self.database_confirm = Some(DatabaseConfirm::Delete {
+                                project: project.name.clone(),
+                                name: snapshot.name.clone(),
+                                selector: SnapshotSelector::Name(snapshot.name.clone()),
+                            });
+                        }
+                    });
+                    ui.end_row();
+                }
+            });
+    }
+
+    #[expect(
+        clippy::too_many_lines,
+        reason = "every database dialog shares the same modal frame"
+    )]
+    fn database_dialog_ui(&mut self, context: &egui::Context) {
+        let Some(dialog) = self.database_dialog.clone() else {
+            return;
+        };
+        let lang = self.lang;
+        let busy = self.requests.foreground_pending() > 0;
+        match dialog {
+            DatabaseDialog::Export {
+                project,
+                mut path,
+                mut force,
+            } => {
+                let modal =
+                    egui::Modal::new(egui::Id::new("database_export")).show(context, |ui| {
+                        ui.set_min_width(520.0);
+                        ui.label(strong(lang.database_export_title()).size(SECTION_TITLE_SIZE));
+                        ui.add_space(4.0);
+                        ui.add(
+                            egui::Label::new(
+                                RichText::new(lang.database_export_body()).color(INK_MUTED),
+                            )
+                            .wrap(),
+                        );
+                        ui.add_space(12.0);
+                        let label = form_label(ui, lang.database_path());
+                        single_line_field(
+                            ui,
+                            &mut path,
+                            (ui.available_width() - 16.0).max(320.0),
+                            "",
+                        )
+                        .labelled_by(label.id);
+                        ui.add_space(6.0);
+                        ui.checkbox(&mut force, lang.database_replace_existing());
+                        if let Some(error) = &self.database_dialog_error {
+                            ui.add_space(8.0);
+                            ui.label(RichText::new(error).size(SMALL_SIZE).color(DANGER));
+                        }
+                        ui.add_space(14.0);
+                        ui.horizontal(|ui| {
+                            if Pill::new(lang.cancel(), PillKind::Ghost)
+                                .height(36.0)
+                                .show(ui)
+                                .clicked()
+                            {
+                                self.database_dialog = None;
+                                self.database_dialog_error = None;
+                            }
+                            if Pill::new(lang.database_export(), PillKind::Primary)
+                                .icon(Icon::Download)
+                                .height(36.0)
+                                .enabled(!busy)
+                                .show(ui)
+                                .clicked()
+                            {
+                                if path.trim().is_empty() || !Path::new(path.trim()).is_absolute() {
+                                    self.database_dialog_error =
+                                        Some(lang.database_absolute_path().to_owned());
+                                } else {
+                                    self.database_dialog = None;
+                                    self.database_dialog_error = None;
+                                    self.request(
+                                        Action::DatabaseExport(project.clone()),
+                                        Request::DatabaseExport {
+                                            project: project.clone(),
+                                            destination: PathBuf::from(path.trim()),
+                                            compression: None,
+                                            overwrite: force,
+                                        },
+                                    );
+                                }
+                            }
+                        });
+                    });
+                if modal.should_close() && !busy {
+                    self.database_dialog = None;
+                    self.database_dialog_error = None;
+                }
+                if self.database_dialog.is_some() {
+                    self.database_dialog = Some(DatabaseDialog::Export {
+                        project,
+                        path,
+                        force,
+                    });
+                }
+            }
+            DatabaseDialog::Import {
+                project,
+                mut path,
+                mut no_drop,
+                mut safety,
+            } => {
+                let modal =
+                    egui::Modal::new(egui::Id::new("database_import")).show(context, |ui| {
+                        ui.set_min_width(560.0);
+                        ui.label(strong(lang.database_import_title()).size(SECTION_TITLE_SIZE));
+                        ui.add_space(4.0);
+                        ui.add(
+                            egui::Label::new(
+                                RichText::new(lang.database_import_body()).color(INK_MUTED),
+                            )
+                            .wrap(),
+                        );
+                        ui.add_space(12.0);
+                        let label = form_label(ui, lang.database_path());
+                        single_line_field(
+                            ui,
+                            &mut path,
+                            (ui.available_width() - 16.0).max(340.0),
+                            "",
+                        )
+                        .labelled_by(label.id);
+                        ui.add_space(6.0);
+                        ui.checkbox(&mut no_drop, lang.database_keep_existing());
+                        ui.checkbox(&mut safety, lang.database_safety_first());
+                        if let Some(error) = &self.database_dialog_error {
+                            ui.add_space(8.0);
+                            ui.label(RichText::new(error).size(SMALL_SIZE).color(DANGER));
+                        }
+                        ui.add_space(14.0);
+                        ui.horizontal(|ui| {
+                            if Pill::new(lang.cancel(), PillKind::Ghost)
+                                .height(36.0)
+                                .show(ui)
+                                .clicked()
+                            {
+                                self.database_dialog = None;
+                                self.database_dialog_error = None;
+                            }
+                            if Pill::new(lang.database_import(), PillKind::Danger)
+                                .icon(Icon::Warning)
+                                .height(36.0)
+                                .enabled(!busy)
+                                .show(ui)
+                                .clicked()
+                            {
+                                if path.trim().is_empty() || !Path::new(path.trim()).is_absolute() {
+                                    self.database_dialog_error =
+                                        Some(lang.database_absolute_path().to_owned());
+                                } else {
+                                    self.database_safety = safety;
+                                    self.database_dialog = None;
+                                    self.database_dialog_error = None;
+                                    self.request(
+                                        Action::DatabaseImport(project.clone()),
+                                        Request::DatabaseImport {
+                                            project: project.clone(),
+                                            source: PathBuf::from(path.trim()),
+                                            no_drop,
+                                            safety_snapshot: safety,
+                                            confirm: true,
+                                        },
+                                    );
+                                }
+                            }
+                        });
+                    });
+                if modal.should_close() && !busy {
+                    self.database_dialog = None;
+                    self.database_dialog_error = None;
+                }
+                if self.database_dialog.is_some() {
+                    self.database_dialog = Some(DatabaseDialog::Import {
+                        project,
+                        path,
+                        no_drop,
+                        safety,
+                    });
+                }
+            }
+        }
+    }
+
+    #[expect(
+        clippy::too_many_lines,
+        reason = "restore and import confirmations share one auditable flow"
+    )]
+    fn database_confirm_ui(&mut self, context: &egui::Context) {
+        let Some(confirm) = self.database_confirm.clone() else {
+            return;
+        };
+        let lang = self.lang;
+        let busy = self.requests.foreground_pending() > 0;
+        let modal = egui::Modal::new(egui::Id::new("database_confirm")).show(context, |ui| {
+            ui.set_min_width(500.0);
+            match &confirm {
+                DatabaseConfirm::Restore {
+                    project,
+                    name,
+                    selector,
+                } => {
+                    ui.label(strong(lang.database_restore_title()).size(SECTION_TITLE_SIZE));
+                    ui.add_space(4.0);
+                    ui.add(
+                        egui::Label::new(
+                            RichText::new(lang.database_restore_body(name, project))
+                                .color(INK_MUTED),
+                        )
+                        .wrap(),
+                    );
+                    ui.add_space(10.0);
+                    ui.checkbox(&mut self.database_safety, lang.database_safety_first());
+                    if !self.database_safety {
+                        ui.add(
+                            egui::Label::new(
+                                RichText::new(lang.database_no_safety())
+                                    .size(SMALL_SIZE)
+                                    .color(WARNING),
+                            )
+                            .wrap(),
+                        );
+                    }
+                    ui.add_space(14.0);
+                    ui.horizontal(|ui| {
+                        if Pill::new(lang.cancel(), PillKind::Ghost)
+                            .height(36.0)
+                            .show(ui)
+                            .clicked()
+                        {
+                            self.database_confirm = None;
+                        }
+                        if Pill::new(lang.database_restore(), PillKind::Danger)
+                            .icon(Icon::Warning)
+                            .height(36.0)
+                            .enabled(!busy)
+                            .show(ui)
+                            .clicked()
+                        {
+                            self.database_confirm = None;
+                            self.request(
+                                Action::DatabaseRestore(project.clone()),
+                                Request::DatabaseSnapshotRestore {
+                                    project: project.clone(),
+                                    snapshot: selector.clone(),
+                                    safety_snapshot: self.database_safety,
+                                    confirm: true,
+                                },
+                            );
+                        }
+                    });
+                }
+                DatabaseConfirm::Delete {
+                    project,
+                    name,
+                    selector,
+                } => {
+                    ui.label(strong(lang.database_delete_title()).size(SECTION_TITLE_SIZE));
+                    ui.add_space(4.0);
+                    ui.add(
+                        egui::Label::new(
+                            RichText::new(lang.database_delete_body(name, project))
+                                .color(INK_MUTED),
+                        )
+                        .wrap(),
+                    );
+                    ui.add_space(14.0);
+                    ui.horizontal(|ui| {
+                        if Pill::new(lang.cancel(), PillKind::Ghost)
+                            .height(36.0)
+                            .show(ui)
+                            .clicked()
+                        {
+                            self.database_confirm = None;
+                        }
+                        if Pill::new(lang.action_delete(), PillKind::Danger)
+                            .icon(Icon::Trash)
+                            .height(36.0)
+                            .enabled(!busy)
+                            .show(ui)
+                            .clicked()
+                        {
+                            self.database_confirm = None;
+                            self.request(
+                                Action::DatabaseDelete(project.clone()),
+                                Request::DatabaseSnapshotDelete {
+                                    project: project.clone(),
+                                    snapshot: selector.clone(),
+                                    confirm: true,
+                                },
+                            );
+                        }
+                    });
+                }
+                DatabaseConfirm::Cleanup { project } => {
+                    ui.label(strong(lang.database_cleanup_title()).size(SECTION_TITLE_SIZE));
+                    ui.add_space(4.0);
+                    ui.add(
+                        egui::Label::new(
+                            RichText::new(lang.database_cleanup_body(project)).color(INK_MUTED),
+                        )
+                        .wrap(),
+                    );
+                    ui.add_space(14.0);
+                    ui.horizontal(|ui| {
+                        if Pill::new(lang.cancel(), PillKind::Ghost)
+                            .height(36.0)
+                            .show(ui)
+                            .clicked()
+                        {
+                            self.database_confirm = None;
+                        }
+                        if Pill::new(lang.database_cleanup(), PillKind::Danger)
+                            .icon(Icon::Trash)
+                            .height(36.0)
+                            .enabled(!busy)
+                            .show(ui)
+                            .clicked()
+                        {
+                            self.database_confirm = None;
+                            self.request(
+                                Action::DatabaseCleanup(project.clone()),
+                                Request::DatabaseSnapshotCleanup {
+                                    project: project.clone(),
+                                    confirm: true,
+                                },
+                            );
+                        }
+                    });
+                }
+            }
+        });
+        if modal.should_close() && !busy {
+            self.database_confirm = None;
+        }
     }
 
     #[expect(
@@ -2915,6 +3691,8 @@ impl eframe::App for LocalWebApp {
         }
         self.remove_dialog(&context);
         self.stop_dialog(&context);
+        self.database_dialog_ui(&context);
+        self.database_confirm_ui(&context);
         if fade < 1.0 {
             context.request_repaint_after(FADE_REPAINT_INTERVAL);
         } else {
@@ -3719,6 +4497,48 @@ fn web_label(server: WebServer) -> &'static str {
         WebServer::Nginx => "nginx",
         WebServer::Apache => "Apache",
     }
+}
+
+#[expect(
+    clippy::cast_precision_loss,
+    reason = "human-readable sizes do not need exact integer precision"
+)]
+fn human_size(bytes: u64) -> String {
+    const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
+    let mut value = bytes as f64;
+    let mut unit = 0;
+    while value >= 1024.0 && unit + 1 < UNITS.len() {
+        value /= 1024.0;
+        unit += 1;
+    }
+    if unit == 0 {
+        format!("{bytes} B")
+    } else {
+        format!("{value:.1} {}", UNITS[unit])
+    }
+}
+
+fn database_home() -> PathBuf {
+    std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map_or_else(|| PathBuf::from("."), PathBuf::from)
+}
+
+fn default_export_path(project: &str) -> String {
+    database_home()
+        .join(format!("{project}.sql"))
+        .display()
+        .to_string()
+}
+
+fn database_result_message(result: &DatabaseOperationResult) -> String {
+    let mut message = result.message.clone();
+    if let Some(snapshot) = &result.safety_snapshot {
+        message.push_str(" Safety snapshot: ");
+        message.push_str(&snapshot.name);
+        message.push('.');
+    }
+    message
 }
 
 #[cfg(test)]

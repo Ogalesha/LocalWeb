@@ -7,6 +7,8 @@
 //! create projects, start them, and execute commands inside the managed
 //! runtime exactly like the desktop application does.
 
+#![recursion_limit = "512"]
+
 mod tools;
 
 use anyhow::Result;
@@ -429,7 +431,7 @@ mod tests {
         let tools = reply["result"]["tools"]
             .as_array()
             .expect("tools is an array");
-        assert_eq!(tools.len(), 19);
+        assert_eq!(tools.len(), 26);
         assert!(
             tools
                 .iter()

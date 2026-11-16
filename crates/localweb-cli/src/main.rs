@@ -5,9 +5,12 @@ use localweb_core::{
     SupervisorConfig, WebServer,
     certificate::CaPaths,
     copy,
+    database::{CompressionFormat, DatabaseOperationResult, DatabaseSnapshot, SnapshotSelector},
     hosts::{HostsSync, HostsSyncLock},
     send_request,
 };
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt as _;
 use std::{
     ffi::OsString,
     io::{BufRead, IsTerminal, Write},
@@ -29,10 +32,6 @@ struct Cli {
     command: CommandKind,
 }
 
-#[expect(
-    clippy::large_enum_variant,
-    reason = "clap subcommands carry every project option in one place"
-)]
 #[derive(Subcommand)]
 enum CommandKind {
     #[command(about = "Set up LocalWeb")]
@@ -122,6 +121,11 @@ enum CommandKind {
         #[command(subcommand)]
         command: DataCommand,
     },
+    /// Snapshot, export, and import a project's database.
+    Db {
+        #[command(subcommand)]
+        command: DatabaseCommand,
+    },
     /// Route php, composer, node, npm and npx to the current project.
     Integration {
         #[command(subcommand)]
@@ -155,6 +159,114 @@ enum DataCommand {
         #[arg(long)]
         yes: bool,
     },
+}
+
+#[derive(Subcommand)]
+enum DatabaseCommand {
+    /// Manage database-only snapshots.
+    Snapshot {
+        #[command(subcommand)]
+        command: SnapshotCommand,
+    },
+    /// Export the database as SQL, optionally compressed.
+    Export {
+        project: String,
+        /// Destination ending in .sql, .sql.gz, or .sql.zst.
+        #[arg(required_unless_present = "stdout")]
+        path: Option<PathBuf>,
+        /// Write dump data to standard output; messages go to standard error.
+        #[arg(long)]
+        stdout: bool,
+        /// Compression for --stdout (default: none).
+        #[arg(long, value_enum, requires = "stdout")]
+        compression: Option<CompressionArg>,
+        /// Replace the destination if it already exists.
+        #[arg(long, visible_alias = "overwrite")]
+        force: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Import SQL into the project database.
+    Import {
+        project: String,
+        /// Source ending in .sql, .sql.gz, or .sql.zst.
+        path: PathBuf,
+        /// Keep existing objects instead of dropping them first.
+        #[arg(long)]
+        no_drop: bool,
+        /// Skip the automatic safety snapshot.
+        #[arg(long)]
+        no_safety: bool,
+        /// Skip the interactive confirmation prompt.
+        #[arg(long)]
+        yes: bool,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum SnapshotCommand {
+    /// Create a database-only snapshot.
+    Create {
+        project: String,
+        /// Unique display name; generated from the current time when omitted.
+        #[arg(long)]
+        name: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// List snapshots, newest first.
+    List {
+        project: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Restore a snapshot, replacing current database data.
+    Restore {
+        project: String,
+        /// Snapshot display name; use --latest for the newest non-safety snapshot.
+        #[arg(required_unless_present = "latest", conflicts_with = "latest")]
+        snapshot: Option<String>,
+        /// Select the newest non-safety snapshot.
+        #[arg(long)]
+        latest: bool,
+        /// Skip the interactive confirmation prompt.
+        #[arg(long)]
+        yes: bool,
+        /// Do not create a safety snapshot before restoring.
+        #[arg(long)]
+        no_safety: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Delete one snapshot permanently.
+    Delete {
+        project: String,
+        /// Snapshot display name or id.
+        snapshot: String,
+        /// Skip the interactive confirmation prompt.
+        #[arg(long)]
+        yes: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Delete every snapshot for the project permanently.
+    Cleanup {
+        project: String,
+        /// Skip the interactive confirmation prompt.
+        #[arg(long)]
+        yes: bool,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum CompressionArg {
+    None,
+    Gzip,
+    Zstd,
 }
 
 #[derive(Subcommand)]
@@ -497,6 +609,16 @@ impl From<DbArg> for Database {
         }
     }
 }
+impl From<CompressionArg> for CompressionFormat {
+    fn from(value: CompressionArg) -> Self {
+        match value {
+            CompressionArg::None => Self::None,
+            CompressionArg::Gzip => Self::Gzip,
+            CompressionArg::Zstd => Self::Zstd,
+        }
+    }
+}
+
 impl From<CacheArg> for Cache {
     fn from(value: CacheArg) -> Self {
         match value {
@@ -602,6 +724,10 @@ async fn main() -> Result<()> {
             command: DataCommand::Purge { dry_run, yes },
         } => {
             data_purge(&paths, dry_run, yes).await?;
+            return Ok(());
+        }
+        CommandKind::Db { command } => {
+            database_command(&paths, command).await?;
             return Ok(());
         }
         CommandKind::Ca {
@@ -871,6 +997,8 @@ async fn main() -> Result<()> {
                 }
             }
         }
+        Response::Snapshots(snapshots) => render_snapshots(&snapshots),
+        Response::DatabaseOperation(result) => render_operation(&result),
     }
     Ok(())
 }
@@ -1753,6 +1881,345 @@ fn run_helper(operation: &str, input: &[u8]) -> Result<()> {
     Ok(localweb_core::privilege::run_helper(
         &helper, operation, input,
     )?)
+}
+
+async fn database_command(paths: &Paths, command: DatabaseCommand) -> Result<()> {
+    match command {
+        DatabaseCommand::Snapshot { command } => snapshot_command(paths, command).await,
+        DatabaseCommand::Export {
+            project,
+            path,
+            stdout,
+            compression,
+            force,
+            json,
+        } => export_command(paths, &project, path, stdout, compression, force, json).await,
+        DatabaseCommand::Import {
+            project,
+            path,
+            no_drop,
+            no_safety,
+            yes,
+            json,
+        } => {
+            let path = std::path::absolute(&path)
+                .with_context(|| format!("cannot resolve {}", path.display()))?;
+            confirm_database_action(
+                &format!(
+                    "Importing {} into `{project}` replaces database objects{}.",
+                    path.display(),
+                    if no_drop {
+                        " and adds to the existing schema"
+                    } else {
+                        ""
+                    }
+                ),
+                yes,
+            )?;
+            let response = send_request(
+                paths,
+                Request::DatabaseImport {
+                    project,
+                    source: path,
+                    no_drop,
+                    safety_snapshot: !no_safety,
+                    confirm: true,
+                },
+            )
+            .await
+            .context("Can't reach LocalWeb. Run `localweb start`.")?;
+            finish_database_response(response, json)
+        }
+    }
+}
+
+#[expect(
+    clippy::too_many_lines,
+    reason = "snapshot subcommands share one confirmation and response path"
+)]
+async fn snapshot_command(paths: &Paths, command: SnapshotCommand) -> Result<()> {
+    match command {
+        SnapshotCommand::Create {
+            project,
+            name,
+            json,
+        } => {
+            let response = send_request(paths, Request::DatabaseSnapshotCreate { project, name })
+                .await
+                .context("Can't reach LocalWeb. Run `localweb start`.")?;
+            finish_database_response(response, json)
+        }
+        SnapshotCommand::List { project, json } => {
+            let response = send_request(paths, Request::DatabaseSnapshotList { project })
+                .await
+                .context("Can't reach LocalWeb. Run `localweb start`.")?;
+            finish_database_response(response, json)
+        }
+        SnapshotCommand::Restore {
+            project,
+            snapshot,
+            latest,
+            yes,
+            no_safety,
+            json,
+        } => {
+            let selector = if latest {
+                SnapshotSelector::Latest
+            } else {
+                SnapshotSelector::from_cli(
+                    snapshot
+                        .as_deref()
+                        .context("pass a snapshot name or --latest")?,
+                )
+            };
+            let target = match &selector {
+                SnapshotSelector::Latest => "the latest snapshot".to_owned(),
+                SnapshotSelector::Name(name) => format!("snapshot `{name}`"),
+                SnapshotSelector::Id(id) => format!("snapshot `{id}`"),
+            };
+            confirm_database_action(
+                &format!(
+                    "Restoring {target} into `{project}` replaces all current database data{}.",
+                    if no_safety {
+                        ""
+                    } else {
+                        "; a safety snapshot is created first"
+                    }
+                ),
+                yes,
+            )?;
+            let response = send_request(
+                paths,
+                Request::DatabaseSnapshotRestore {
+                    project,
+                    snapshot: selector,
+                    safety_snapshot: !no_safety,
+                    confirm: true,
+                },
+            )
+            .await
+            .context("Can't reach LocalWeb. Run `localweb start`.")?;
+            finish_database_response(response, json)
+        }
+        SnapshotCommand::Delete {
+            project,
+            snapshot,
+            yes,
+            json,
+        } => {
+            confirm_database_action(
+                &format!("Deleting snapshot `{snapshot}` from `{project}` is irreversible."),
+                yes,
+            )?;
+            let response = send_request(
+                paths,
+                Request::DatabaseSnapshotDelete {
+                    project,
+                    snapshot: SnapshotSelector::from_cli(&snapshot),
+                    confirm: true,
+                },
+            )
+            .await
+            .context("Can't reach LocalWeb. Run `localweb start`.")?;
+            finish_database_response(response, json)
+        }
+        SnapshotCommand::Cleanup { project, yes, json } => {
+            confirm_database_action(
+                &format!("Deleting every snapshot of `{project}` is irreversible."),
+                yes,
+            )?;
+            let response = send_request(
+                paths,
+                Request::DatabaseSnapshotCleanup {
+                    project,
+                    confirm: true,
+                },
+            )
+            .await
+            .context("Can't reach LocalWeb. Run `localweb start`.")?;
+            finish_database_response(response, json)
+        }
+    }
+}
+
+async fn export_command(
+    paths: &Paths,
+    project: &str,
+    path: Option<PathBuf>,
+    stdout: bool,
+    compression: Option<CompressionArg>,
+    force: bool,
+    json: bool,
+) -> Result<()> {
+    if stdout && json {
+        bail!("--stdout and --json cannot be combined");
+    }
+    let compression = compression.map(CompressionFormat::from);
+    if stdout {
+        let compression = compression.unwrap_or(CompressionFormat::None);
+        let directory = paths.state.join("tmp/database-cli");
+        std::fs::create_dir_all(&directory)?;
+        #[cfg(unix)]
+        std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o700))?;
+        let suffix = compression
+            .suffix()
+            .map_or_else(String::new, |suffix| format!(".{suffix}"));
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |duration| duration.as_nanos());
+        let temporary = directory.join(format!(
+            "export-{}-{unique}.sql{suffix}",
+            std::process::id()
+        ));
+        let response = send_request(
+            paths,
+            Request::DatabaseExport {
+                project: project.to_owned(),
+                destination: temporary.clone(),
+                compression: Some(compression),
+                overwrite: true,
+            },
+        )
+        .await
+        .context("Can't reach LocalWeb. Run `localweb start`.");
+        let response = match response {
+            Ok(response) => response,
+            Err(error) => {
+                let _ = std::fs::remove_file(&temporary);
+                return Err(error);
+            }
+        };
+        if let Response::Error { code, message } = &response {
+            let _ = std::fs::remove_file(&temporary);
+            bail!("{code}: {message}");
+        }
+        let copy_result = (|| -> Result<()> {
+            let mut file = std::fs::File::open(&temporary)
+                .with_context(|| format!("cannot read export {}", temporary.display()))?;
+            let stdout = std::io::stdout();
+            let mut lock = stdout.lock();
+            std::io::copy(&mut file, &mut lock)?;
+            lock.flush()?;
+            Ok(())
+        })();
+        let _ = std::fs::remove_file(&temporary);
+        copy_result?;
+        if let Response::DatabaseOperation(result) = &response {
+            eprintln!("{}", result.message);
+        }
+        return Ok(());
+    }
+    let path = path.context("pass a destination path or --stdout")?;
+    let path =
+        std::path::absolute(&path).with_context(|| format!("cannot resolve {}", path.display()))?;
+    let response = send_request(
+        paths,
+        Request::DatabaseExport {
+            project: project.to_owned(),
+            destination: path,
+            compression,
+            overwrite: force,
+        },
+    )
+    .await
+    .context("Can't reach LocalWeb. Run `localweb start`.")?;
+    finish_database_response(response, json)
+}
+
+fn finish_database_response(response: Response, json: bool) -> Result<()> {
+    if let Response::Error { code, message } = &response {
+        bail!("{code}: {message}");
+    }
+    if json {
+        println!("{}", serde_json::to_string_pretty(&response)?);
+        return Ok(());
+    }
+    match response {
+        Response::Snapshots(snapshots) => render_snapshots(&snapshots),
+        Response::DatabaseOperation(result) => render_operation(&result),
+        other => bail!("unexpected daemon response: {other:?}"),
+    }
+    Ok(())
+}
+
+fn render_snapshots(snapshots: &[DatabaseSnapshot]) {
+    if snapshots.is_empty() {
+        println!("No database snapshots.");
+        return;
+    }
+    println!(
+        "{:<40} {:<20} {:>10}  {:<16} ID",
+        "NAME", "CREATED (UTC)", "SIZE", "ENGINE"
+    );
+    for snapshot in snapshots {
+        let name = if snapshot.safety {
+            format!("{} (safety)", snapshot.name)
+        } else {
+            snapshot.name.clone()
+        };
+        println!(
+            "{:<40} {:<20} {:>10}  {:<16} {}",
+            name,
+            snapshot.created_at.format("%Y-%m-%d %H:%M:%S"),
+            format_bytes(snapshot.size_bytes),
+            format!("{:?} {}", snapshot.engine, snapshot.engine_version),
+            snapshot.id
+        );
+    }
+}
+
+fn render_operation(result: &DatabaseOperationResult) {
+    println!("{}", result.message);
+    if let Some(snapshot) = &result.safety_snapshot {
+        println!("Safety snapshot: {}", snapshot.name);
+    }
+    if let Some(path) = &result.path {
+        println!("File: {}", path.display());
+    }
+    if let Some(uncompressed) = result.uncompressed_bytes {
+        println!("Database size: {}", format_bytes(uncompressed));
+    }
+    if let Some(reclaimed) = result.reclaimed_bytes {
+        println!("Reclaimed: {}", format_bytes(reclaimed));
+    }
+}
+
+#[expect(
+    clippy::cast_precision_loss,
+    reason = "human-readable sizes do not need exact integer precision"
+)]
+fn format_bytes(bytes: u64) -> String {
+    const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
+    let mut value = bytes as f64;
+    let mut unit = 0;
+    while value >= 1024.0 && unit + 1 < UNITS.len() {
+        value /= 1024.0;
+        unit += 1;
+    }
+    if unit == 0 {
+        format!("{bytes} B")
+    } else {
+        format!("{value:.1} {}", UNITS[unit])
+    }
+}
+
+fn confirm_database_action(action: &str, yes: bool) -> Result<()> {
+    if yes {
+        return Ok(());
+    }
+    if !std::io::stdin().is_terminal() {
+        bail!("refusing to continue without --yes (standard input is not a terminal)");
+    }
+    eprintln!("{action}");
+    eprint!("Continue? [y/N] ");
+    std::io::stderr().flush()?;
+    let mut answer = String::new();
+    std::io::stdin().lock().read_line(&mut answer)?;
+    if matches!(answer.trim().to_ascii_lowercase().as_str(), "y" | "yes") {
+        Ok(())
+    } else {
+        bail!("cancelled")
+    }
 }
 
 async fn data_purge(paths: &Paths, dry_run: bool, yes: bool) -> Result<()> {

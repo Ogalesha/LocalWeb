@@ -175,7 +175,9 @@ def main():
 
     for env, names, dest in [
         ("LOCALWEB_MYSQL_CLIENT", ["mysql"], "mysql/bin/mysql"),
+        ("LOCALWEB_MYSQL_DUMP", ["mysqldump"], "mysql/bin/mysqldump"),
         ("LOCALWEB_MARIADB_CLIENT", ["mariadb"], "mariadb/bin/mariadb"),
+        ("LOCALWEB_MARIADB_DUMP", ["mariadb-dump", "mysqldump"], "mariadb/bin/mariadb-dump"),
         ("LOCALWEB_MARIADB_INIT", ["mariadb-install-db"], "mariadb/bin/mariadb-install-db"),
         ("LOCALWEB_MY_PRINT_DEFAULTS", ["my_print_defaults"], "mariadb/bin/my_print_defaults"),
         ("LOCALWEB_REDIS_CLIENT", ["redis-cli"], "redis/bin/redis-cli"),
@@ -211,7 +213,7 @@ def main():
     pg_lib = directory("LOCALWEB_POSTGRES_LIB", run(str(pg_config), "--pkglibdir"))
     pg_prefix = Path(os.path.commonpath([pg_bin, pg_share, pg_lib]))
     native = Path("postgres/native")
-    for name in ["postgres", "initdb", "psql"]:
+    for name in ["postgres", "initdb", "psql", "pg_dump", "pg_restore"]:
         copy_file(pg_bin / name, native / pg_bin.relative_to(pg_prefix) / name)
     copy_tree(pg_share, native / pg_share.relative_to(pg_prefix))
     # Procedural-language modules require host interpreters that LocalWeb

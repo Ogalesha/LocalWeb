@@ -8,6 +8,7 @@ pub(super) enum Query {
     Projects,
     Certificate,
     Environment(String),
+    Snapshots(String),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

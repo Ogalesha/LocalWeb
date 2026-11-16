@@ -38,6 +38,7 @@ Builds are published after testing, so a push may take time to appear here.
 | **MySQL** | Shared local server with a database and credentials for each project; the reference payload uses MySQL 8.4 LTS. |
 | **PostgreSQL** | Private local cluster with a database and login for each project. |
 | **SQLite** | A LocalWeb-owned database file for each project, accessed through PHP. |
+| **Database management** | Database-only snapshots, checksum-verified restore, SQL export and confined SQL import for every database project, shared by the desktop app, CLI and MCP server. |
 | **Redis** | A separate local cache process for each project. |
 | **Composer 2** | Runs with the project's selected PHP. |
 | **Node.js 24, npm and npx** | Bundled LTS build tools. Node.js 22 and 20 can also be selected when matching system installations are available; Node.js 20 is EOL. |
@@ -256,6 +257,8 @@ localweb npm acme -- run build
 localweb npx acme -- --version
 localweb exec acme -- php artisan about
 localweb shell acme
+localweb db snapshot create acme --name before-migration
+localweb db export acme ~/Backups/acme.sql.zst
 localweb autostart enable
 localweb shutdown
 ```
@@ -276,6 +279,51 @@ the app returned an error: check its logs and the values from `localweb env <nam
 Gateway state is
 checked through the native service manager. Worker counts describe configured
 workers.
+
+## Database snapshots and SQL files
+
+Every project with a database has database-only snapshots, restore, SQL
+export and SQL import. Open **Details → Database Management** in the desktop
+app, or use the same operations from the CLI:
+
+```bash
+localweb db snapshot create acme --name before-migration
+localweb db snapshot list acme
+localweb db snapshot restore acme --latest --yes
+localweb db snapshot restore acme before-migration --no-safety --yes
+localweb db snapshot delete acme before-migration --yes
+localweb db snapshot cleanup acme --yes
+
+localweb db export acme ~/Backups/acme.sql.zst
+localweb db export acme --stdout --compression gzip > acme.sql.gz
+localweb db import acme ~/Backups/acme.sql.zst --yes
+localweb db import acme ~/Backups/partial.sql --no-drop --yes
+```
+
+Snapshots contain database state only. They never include project files, PHP
+or web-server configuration, Redis data, Mailpit messages or certificates.
+MariaDB, MySQL and PostgreSQL snapshots are logical SQL dumps; SQLite
+snapshots use the online backup API. All payloads are Zstandard-compressed,
+checksummed and published atomically under the platform data directory
+(`~/.local/share/localweb/databases/snapshots/` on Ubuntu, Arch/Omarchy and
+macOS, `%LOCALAPPDATA%\LocalWeb\data\databases\snapshots\` on Windows).
+
+Restore verifies the checksum, engine and major version before changing data,
+creates a safety snapshot first by default, and verifies the database after
+the restore. `--latest` selects the newest normal snapshot; safety snapshots
+must be named explicitly. Export supports `.sql`, `.sql.gz` and `.sql.zst`,
+never replaces an existing file unless `--force` is passed, and `--stdout`
+writes only data to standard output. Import replaces existing objects by
+default, supports `--no-drop` and a safety snapshot, and validates the whole
+dump before modifying anything.
+
+Imports are confined to the project database with project-scoped
+credentials. Cross-database and administrator commands, client shell
+commands, path traversal and decompression bombs are rejected before any
+change. MySQL and MariaDB DDL is not atomic, so use a safety snapshot or a
+`--single-transaction` PostgreSQL workflow where rollback matters. See
+[database management](docs/database-management.md) for the full rules,
+storage layout, engine behaviour and troubleshooting.
 
 ## Shell integration
 
@@ -335,7 +383,9 @@ framework commands or tests inside the project runtime, read logs and open
 the environment values. The tool set covers status and diagnostics, daemon
 start/stop, project add/remove/start/stop/restart, `@php`/`@composer`/`@node`/
 `@npm`/`@npx` command execution, environment, runtime list, certificate
-status/installation, hosts synchronization and login autostart.
+status/installation, hosts synchronization, login autostart, and database
+snapshots, restore, export and import. Destructive database tools require an
+explicit `"confirm": true`.
 
 The desktop **Settings** view shows the resolved `localweb-mcp` path, copies
 the configuration below, and lists the active environment values.
