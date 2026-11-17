@@ -91,7 +91,7 @@ def php_literal(value):
 def database_php(values, driver):
     if driver == "sqlite":
         dsn = "sqlite:" + values["DB_DATABASE"]
-        credentials = ""
+        credentials = ", null, null"
     else:
         dsn = f"{driver}:host={values['DB_HOST']};port={values['DB_PORT']};dbname={values['DB_DATABASE']}"
         credentials = f", {php_literal(values['DB_USERNAME'])}, {php_literal(values['DB_PASSWORD'])}"
@@ -377,10 +377,14 @@ try:
             suffix = f"&value={urllib.parse.quote(value)}" if op in ("init", "set") else ""
             return fetch(f"https://{project}.test/db.php?op={op}{suffix}")
 
-        assert db(name_a, "init", "alpha") == "initialized"
-        assert db(name_b, "init", "bravo") == "initialized"
-        assert db(name_a, "read") == "alpha"
-        assert db(name_b, "read") == "bravo"
+        body = db(name_a, "init", "alpha")
+        assert body == "initialized", f"{engine} init returned {body!r}"
+        body = db(name_b, "init", "bravo")
+        assert body == "initialized", f"{engine} init returned {body!r}"
+        body = db(name_a, "read")
+        assert body == "alpha", f"{engine} read returned {body!r}"
+        body = db(name_b, "read")
+        assert body == "bravo", f"{engine} read returned {body!r}"
 
         cli("db", "snapshot", "create", name_a, "--name", "baseline", "--json")
         names = snapshot_names(name_a)
