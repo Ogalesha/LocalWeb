@@ -5551,14 +5551,32 @@ mod tests {
             app.edit_project = None;
             app.form = AddProjectForm::default();
             app.details = None;
-            assert_view_fits(&mut app, View::Settings, 560.0, &[stop]);
+            app.shell_integration = Some(ShellIntegrationStatus {
+                shim_dir: PathBuf::from("/home/developer/.local/share/localweb/bin"),
+                shims_installed: true,
+                missing_tools: Vec::new(),
+                path_active: true,
+                shell_configured: true,
+                shell_file: Some(PathBuf::from("/home/developer/.config/fish/config.fish")),
+            });
+            assert_view_fits(
+                &mut app,
+                View::Settings,
+                4000.0,
+                &[
+                    stop,
+                    lang.settings_shell_title(),
+                    lang.settings_shell_reinstall(),
+                    lang.settings_shell_remove(),
+                ],
+            );
             assert_view_fits(
                 &mut app,
                 View::Settings,
                 4000.0,
                 &[
                     lang.settings_shell_title(),
-                    lang.settings_shell_install(),
+                    lang.settings_shell_reinstall(),
                     lang.maintenance_title(),
                     lang.refresh(),
                     lang.sync_domains(),
