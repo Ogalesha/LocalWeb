@@ -32,6 +32,13 @@ struct Cli {
     command: CommandKind,
 }
 
+#[cfg_attr(
+    windows,
+    expect(
+        clippy::large_enum_variant,
+        reason = "the clap subcommand tree mirrors the documented CLI grammar"
+    )
+)]
 #[derive(Subcommand)]
 enum CommandKind {
     #[command(about = "Set up LocalWeb")]

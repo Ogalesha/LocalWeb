@@ -446,12 +446,28 @@ fn ensure_contained(root: &Path, path: &Path) -> Result<()> {
     Ok(())
 }
 
+#[cfg_attr(
+    windows,
+    expect(
+        clippy::unnecessary_wraps,
+        reason = "Windows inherits the private profile ACL; callers stay platform neutral"
+    )
+)]
 fn restrict_directory(path: &Path) -> Result<()> {
     #[cfg(unix)]
     fs::set_permissions(path, fs::Permissions::from_mode(0o700))?;
+    #[cfg(not(unix))]
+    let _ = path;
     Ok(())
 }
 
+#[cfg_attr(
+    windows,
+    expect(
+        clippy::unnecessary_wraps,
+        reason = "Windows does not expose a directory fsync equivalent"
+    )
+)]
 fn sync_directory(path: &Path) -> Result<()> {
     #[cfg(unix)]
     match File::open(path).and_then(|directory| directory.sync_all()) {
