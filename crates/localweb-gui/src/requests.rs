@@ -7,6 +7,7 @@ pub(super) enum Query {
     Status,
     Projects,
     Certificate,
+    ShellIntegration,
     Environment(String),
     Snapshots(String),
 }

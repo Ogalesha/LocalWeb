@@ -2,7 +2,7 @@ use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand, ValueEnum};
 use localweb_core::{
     Cache, Database, ExecutionSpec, NewProject, Paths, Profile, Project, Request, Response,
-    SupervisorConfig, WebServer,
+    ShellIntegrationStatus, SupervisorConfig, WebServer,
     certificate::CaPaths,
     copy,
     database::{CompressionFormat, DatabaseOperationResult, DatabaseSnapshot, SnapshotSelector},
@@ -42,7 +42,11 @@ struct Cli {
 #[derive(Subcommand)]
 enum CommandKind {
     #[command(about = "Set up LocalWeb")]
-    Setup,
+    Setup {
+        /// Leave the shell and the user PATH untouched.
+        #[arg(long)]
+        no_shell_integration: bool,
+    },
     #[command(about = "Start LocalWeb")]
     Start,
     #[command(about = "Stop LocalWeb and running projects")]
@@ -154,7 +158,11 @@ enum IntegrationCommand {
     #[command(about = "Remove the shims and the managed shell block")]
     Remove,
     #[command(about = "Report whether the shims are active")]
-    Status,
+    Status {
+        /// Print a machine-readable status object for the desktop app.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -651,8 +659,10 @@ async fn main() -> Result<()> {
     let mut sync_after = false;
     let mut env_format = None;
     let request = match cli.command {
-        CommandKind::Setup => {
-            setup(&paths)?;
+        CommandKind::Setup {
+            no_shell_integration,
+        } => {
+            setup(&paths, no_shell_integration)?;
             return Ok(());
         }
         CommandKind::Integration { command } => {
@@ -1040,12 +1050,15 @@ async fn wait_for_daemon(paths: &Paths) -> Result<()> {
     }
 }
 
-fn setup(paths: &Paths) -> Result<()> {
+fn setup(paths: &Paths, no_shell_integration: bool) -> Result<()> {
     paths.create()?;
     let _ = localweb_core::GlobalConfig::load_or_create(paths)?;
     CaPaths::new(paths).ensure_ca()?;
     register_paths(paths)?;
     localweb_core::service::write_user_units(paths)?;
+    if !no_shell_integration {
+        install_integration_with_notice(paths);
+    }
     if cfg!(target_os = "macos") {
         println!(
             "Setup complete. Run `localweb ca install`, then `localweb start`. Login autostart is on; turn it off with `localweb autostart disable`."
@@ -1055,7 +1068,25 @@ fn setup(paths: &Paths) -> Result<()> {
             "Setup complete. Run `localweb ca install`, then `localweb start`. Login autostart is off."
         );
     }
+    if no_shell_integration {
+        println!(
+            "Shell integration was skipped. Run `localweb integration install` to use project runtimes from any terminal."
+        );
+    }
     Ok(())
+}
+
+/// Installs the shims without turning a convenience failure into a failed setup.
+///
+/// The desktop Settings view reports the resulting state and can retry the
+/// same command, so setup still completes when a shell file is not writable.
+fn install_integration_with_notice(paths: &Paths) {
+    if let Err(error) = install_integration(paths) {
+        eprintln!("LocalWeb: shell integration was not installed: {error:#}");
+        eprintln!(
+            "LocalWeb: retry with `localweb integration install` or from Settings in the desktop app."
+        );
+    }
 }
 
 fn register_paths(paths: &Paths) -> Result<()> {
@@ -1379,7 +1410,7 @@ fn integration(paths: &Paths, command: IntegrationCommand) -> Result<()> {
     match command {
         IntegrationCommand::Install => install_integration(paths),
         IntegrationCommand::Remove => remove_integration(paths),
-        IntegrationCommand::Status => integration_status(paths),
+        IntegrationCommand::Status { json } => integration_status(paths, json),
     }
 }
 
@@ -1447,25 +1478,48 @@ fn remove_integration(paths: &Paths) -> Result<()> {
     Ok(())
 }
 
-fn integration_status(paths: &Paths) -> Result<()> {
-    let dir = integration_dir(paths);
-    let missing = SHIM_TOOLS
-        .iter()
-        .filter(|tool| !shim_installed(&dir, tool))
-        .copied()
-        .collect::<Vec<_>>();
-    if missing.is_empty() {
-        println!("Shims: installed in {}", dir.display());
-    } else {
-        println!("Shims: missing {}", missing.join(", "));
+fn integration_status(paths: &Paths, json: bool) -> Result<()> {
+    let status = shell_integration_status(paths)?;
+    if json {
+        println!("{}", serde_json::to_string(&status)?);
+        return Ok(());
     }
-    let on_path = std::env::var_os("PATH")
-        .is_some_and(|value| std::env::split_paths(&value).any(|entry| same_dir(&entry, &dir)));
-    println!("PATH: {}", if on_path { "active" } else { "not active" });
-    let configured = report_shell_status(&dir)?;
-    if missing.is_empty() && configured && on_path {
+    if status.shims_installed {
+        println!("Shims: installed in {}", status.shim_dir.display());
+    } else {
+        println!("Shims: missing {}", status.missing_tools.join(", "));
+    }
+    println!(
+        "PATH: {}",
+        if status.path_active {
+            "active"
+        } else {
+            "not active"
+        }
+    );
+    if let Some(startup) = &status.shell_file {
+        println!(
+            "Shell startup file: {} ({})",
+            startup.display(),
+            if status.shell_configured {
+                "configured"
+            } else {
+                "not configured"
+            }
+        );
+    } else {
+        println!(
+            "User PATH: {}",
+            if status.shell_configured {
+                "configured"
+            } else {
+                "not configured"
+            }
+        );
+    }
+    if status.ready() {
         println!("Run `php -v` inside a project folder to use its PHP.");
-    } else if missing.is_empty() && configured {
+    } else if status.shims_installed && status.shell_configured {
         println!("Open a new terminal to activate the shims.");
     } else {
         println!("Run `localweb integration install` to set it up.");
@@ -1473,20 +1527,32 @@ fn integration_status(paths: &Paths) -> Result<()> {
     Ok(())
 }
 
+fn shell_integration_status(paths: &Paths) -> Result<ShellIntegrationStatus> {
+    let dir = integration_dir(paths);
+    let missing = SHIM_TOOLS
+        .iter()
+        .filter(|tool| !shim_installed(&dir, tool))
+        .copied()
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    let path_active = std::env::var_os("PATH")
+        .is_some_and(|value| std::env::split_paths(&value).any(|entry| same_dir(&entry, &dir)));
+    let (shell_configured, shell_file) = report_shell_status(&dir)?;
+    Ok(ShellIntegrationStatus {
+        shim_dir: dir,
+        shims_installed: missing.is_empty(),
+        missing_tools: missing,
+        path_active,
+        shell_configured,
+        shell_file,
+    })
+}
+
 #[cfg(unix)]
-fn report_shell_status(_dir: &Path) -> Result<bool> {
+fn report_shell_status(_dir: &Path) -> Result<(bool, Option<PathBuf>)> {
     let (startup, _) = shell_startup_file()?;
     let configured = std::fs::read_to_string(&startup).is_ok_and(|text| has_managed_block(&text));
-    println!(
-        "Shell startup file: {} ({})",
-        startup.display(),
-        if configured {
-            "configured"
-        } else {
-            "not configured"
-        }
-    );
-    Ok(configured)
+    Ok((configured, Some(startup)))
 }
 
 #[cfg(windows)]
@@ -1494,18 +1560,10 @@ fn report_shell_status(_dir: &Path) -> Result<bool> {
     clippy::unnecessary_wraps,
     reason = "mirrors the Unix signature so the caller stays platform-neutral"
 )]
-fn report_shell_status(dir: &Path) -> Result<bool> {
+fn report_shell_status(dir: &Path) -> Result<(bool, Option<PathBuf>)> {
     let configured = read_user_path()
         .is_ok_and(|value| env_paths(&value).any(|entry| same_dir(Path::new(&entry), dir)));
-    println!(
-        "User PATH: {}",
-        if configured {
-            "configured"
-        } else {
-            "not configured"
-        }
-    );
-    Ok(configured)
+    Ok((configured, None))
 }
 
 fn same_dir(left: &Path, right: &Path) -> bool {
@@ -2626,6 +2684,31 @@ mod tests {
             ])
             .is_err()
         );
+    }
+
+    #[test]
+    fn setup_installs_shell_integration_unless_disabled() {
+        let cli = Cli::try_parse_from(["localweb", "setup"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            CommandKind::Setup {
+                no_shell_integration: false
+            }
+        ));
+        let cli = Cli::try_parse_from(["localweb", "setup", "--no-shell-integration"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            CommandKind::Setup {
+                no_shell_integration: true
+            }
+        ));
+        let cli = Cli::try_parse_from(["localweb", "integration", "status", "--json"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            CommandKind::Integration {
+                command: IntegrationCommand::Status { json: true }
+            }
+        ));
     }
 
     #[test]

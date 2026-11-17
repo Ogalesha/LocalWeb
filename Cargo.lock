@@ -2257,6 +2257,7 @@ dependencies = [
  "image",
  "localweb-core",
  "mimalloc",
+ "serde_json",
  "skrifa",
  "tokio",
  "tray-icon",

@@ -4447,4 +4447,628 @@ impl Lang {
             if autostart { yes } else { no }
         )
     }
+
+    // Shell integration settings.
+
+    pub fn settings_shell_title(self) -> &'static str {
+        match self {
+            Self::English => "Shell integration",
+            Self::Italiano => "Integrazione shell",
+            Self::Shqip => "Integrimi i shell-it",
+            Self::Spanish => "Integración con la shell",
+            Self::French => "Intégration au shell",
+            Self::Portuguese => "Integração com o shell",
+            Self::Russian => "Интеграция с оболочкой",
+            Self::Polish => "Integracja z powłoką",
+            Self::Ukrainian => "Інтеграція з оболонкою",
+            Self::Turkish => "Kabuk entegrasyonu",
+            Self::Greek => "Ενσωμάτωση κελύφους",
+            Self::Hindi => "शेल इंटीग्रेशन",
+            Self::Chinese => "Shell 集成",
+            Self::Swedish => "Skalsintegration",
+        }
+    }
+
+    pub fn settings_shell_body(self) -> &'static str {
+        match self {
+            Self::English => {
+                "Run php, composer, node, npm and npx with the versions of the project containing the current folder."
+            }
+            Self::Italiano => {
+                "Esegui php, composer, node, npm e npx con le versioni del progetto che contiene la cartella corrente."
+            }
+            Self::Shqip => {
+                "Ekzekuto php, composer, node, npm dhe npx me versionet e projektit që përmban dosjen aktuale."
+            }
+            Self::Spanish => {
+                "Ejecuta php, composer, node, npm y npx con las versiones del proyecto que contiene la carpeta actual."
+            }
+            Self::French => {
+                "Exécutez php, composer, node, npm et npx avec les versions du projet qui contient le dossier courant."
+            }
+            Self::Portuguese => {
+                "Execute php, composer, node, npm e npx com as versões do projeto que contém a pasta atual."
+            }
+            Self::Russian => {
+                "Запускайте php, composer, node, npm и npx с версиями проекта, содержащего текущую папку."
+            }
+            Self::Polish => {
+                "Uruchamiaj php, composer, node, npm i npx w wersjach projektu zawierającego bieżący folder."
+            }
+            Self::Ukrainian => {
+                "Запускайте php, composer, node, npm і npx з версіями проєкту, що містить поточну теку."
+            }
+            Self::Turkish => {
+                "Geçerli klasörü içeren projenin sürümleriyle php, composer, node, npm ve npx çalıştırın."
+            }
+            Self::Greek => {
+                "Εκτελέστε php, composer, node, npm και npx με τις εκδόσεις του έργου που περιέχει τον τρέχοντα φάκελο."
+            }
+            Self::Hindi => {
+                "वर्तमान फ़ोल्डर वाले प्रोजेक्ट के संस्करणों के साथ php, composer, node, npm और npx चलाएँ।"
+            }
+            Self::Chinese => "使用当前文件夹所属项目的版本运行 php、composer、node、npm 和 npx。",
+            Self::Swedish => {
+                "Kör php, composer, node, npm och npx med versionerna från projektet som innehåller aktuell mapp."
+            }
+        }
+    }
+
+    pub fn settings_shell_active(self) -> &'static str {
+        match self {
+            Self::English | Self::French => "Active",
+            Self::Italiano => "Attiva",
+            Self::Shqip => "Aktive",
+            Self::Spanish => "Activa",
+            Self::Portuguese => "Ativa",
+            Self::Russian | Self::Ukrainian => "Активна",
+            Self::Polish => "Aktywna",
+            Self::Turkish => "Etkin",
+            Self::Greek => "Ενεργή",
+            Self::Hindi => "सक्रिय",
+            Self::Chinese => "已启用",
+            Self::Swedish => "Aktiv",
+        }
+    }
+
+    pub fn settings_shell_inactive(self) -> &'static str {
+        match self {
+            Self::English => "Not installed",
+            Self::Italiano => "Non installata",
+            Self::Shqip => "Nuk është instaluar",
+            Self::Spanish => "No instalada",
+            Self::French => "Non installée",
+            Self::Portuguese => "Não instalada",
+            Self::Russian => "Не установлена",
+            Self::Polish => "Nie zainstalowano",
+            Self::Ukrainian => "Не встановлено",
+            Self::Turkish => "Kurulmadı",
+            Self::Greek => "Δεν έχει εγκατασταθεί",
+            Self::Hindi => "इंस्टॉल नहीं है",
+            Self::Chinese => "未安装",
+            Self::Swedish => "Inte installerad",
+        }
+    }
+
+    pub fn settings_shell_incomplete(self) -> &'static str {
+        match self {
+            Self::English => "Needs repair",
+            Self::Italiano => "Da riparare",
+            Self::Shqip => "Kërkon riparim",
+            Self::Spanish => "Necesita reparación",
+            Self::French => "À réparer",
+            Self::Portuguese => "Precisa de reparo",
+            Self::Russian => "Требует восстановления",
+            Self::Polish => "Wymaga naprawy",
+            Self::Ukrainian => "Потребує відновлення",
+            Self::Turkish => "Onarım gerekiyor",
+            Self::Greek => "Χρειάζεται επιδιόρθωση",
+            Self::Hindi => "मरम्मत आवश्यक",
+            Self::Chinese => "需要修复",
+            Self::Swedish => "Behöver repareras",
+        }
+    }
+
+    pub fn settings_shell_new_terminal(self) -> &'static str {
+        match self {
+            Self::English => "Installed — open a new terminal",
+            Self::Italiano => "Installata — apri un nuovo terminale",
+            Self::Shqip => "Instaluar — hap një terminal të ri",
+            Self::Spanish => "Instalada: abre un terminal nuevo",
+            Self::French => "Installée — ouvrez un nouveau terminal",
+            Self::Portuguese => "Instalada — abra um novo terminal",
+            Self::Russian => "Установлена — откройте новый терминал",
+            Self::Polish => "Zainstalowana — otwórz nowy terminal",
+            Self::Ukrainian => "Встановлено — відкрийте новий термінал",
+            Self::Turkish => "Kuruldu — yeni bir terminal açın",
+            Self::Greek => "Εγκαταστάθηκε — ανοίξτε νέο τερματικό",
+            Self::Hindi => "इंस्टॉल है — नया टर्मिनल खोलें",
+            Self::Chinese => "已安装 — 请打开新终端",
+            Self::Swedish => "Installerad — öppna en ny terminal",
+        }
+    }
+
+    pub fn settings_shell_checking(self) -> &'static str {
+        match self {
+            Self::English => "Checking",
+            Self::Italiano => "Verifica in corso",
+            Self::Shqip => "Duke kontrolluar",
+            Self::Spanish => "Comprobando",
+            Self::French => "Vérification",
+            Self::Portuguese => "Verificando",
+            Self::Russian => "Проверка",
+            Self::Polish => "Sprawdzanie",
+            Self::Ukrainian => "Перевірка",
+            Self::Turkish => "Kontrol ediliyor",
+            Self::Greek => "Έλεγχος",
+            Self::Hindi => "जाँच हो रही है",
+            Self::Chinese => "正在检查",
+            Self::Swedish => "Kontrollerar",
+        }
+    }
+
+    pub fn settings_shell_unavailable(self) -> &'static str {
+        match self {
+            Self::English => "Status unavailable",
+            Self::Italiano => "Stato non disponibile",
+            Self::Shqip => "Statusi i padisponueshëm",
+            Self::Spanish => "Estado no disponible",
+            Self::French => "État indisponible",
+            Self::Portuguese => "Estado indisponível",
+            Self::Russian => "Состояние недоступно",
+            Self::Polish => "Stan niedostępny",
+            Self::Ukrainian => "Стан недоступний",
+            Self::Turkish => "Durum kullanılamıyor",
+            Self::Greek => "Η κατάσταση δεν είναι διαθέσιμη",
+            Self::Hindi => "स्थिति उपलब्ध नहीं",
+            Self::Chinese => "状态不可用",
+            Self::Swedish => "Statusen är inte tillgänglig",
+        }
+    }
+
+    pub fn settings_shell_ready_body(self) -> &'static str {
+        match self {
+            Self::English => {
+                "Inside a project folder, php, composer, node, npm and npx use the project versions. Outside projects, the system tools are used."
+            }
+            Self::Italiano => {
+                "Dentro la cartella di un progetto, php, composer, node, npm e npx usano le versioni del progetto. Fuori dai progetti vengono usati gli strumenti di sistema."
+            }
+            Self::Shqip => {
+                "Brenda dosjes së projektit, php, composer, node, npm dhe npx përdorin versionet e projektit. Jashtë projekteve përdoren mjetet e sistemit."
+            }
+            Self::Spanish => {
+                "Dentro de la carpeta de un proyecto, php, composer, node, npm y npx usan las versiones del proyecto. Fuera de los proyectos se usan las herramientas del sistema."
+            }
+            Self::French => {
+                "Dans le dossier d’un projet, php, composer, node, npm et npx utilisent les versions du projet. Hors des projets, les outils du système sont utilisés."
+            }
+            Self::Portuguese => {
+                "Dentro da pasta de um projeto, php, composer, node, npm e npx usam as versões do projeto. Fora dos projetos, são usadas as ferramentas do sistema."
+            }
+            Self::Russian => {
+                "В папке проекта php, composer, node, npm и npx используют версии проекта. Вне проектов используются системные инструменты."
+            }
+            Self::Polish => {
+                "W folderze projektu php, composer, node, npm i npx używają wersji projektu. Poza projektami używane są narzędzia systemowe."
+            }
+            Self::Ukrainian => {
+                "У теці проєкту php, composer, node, npm і npx використовують версії проєкту. Поза проєктами використовуються системні інструменти."
+            }
+            Self::Turkish => {
+                "Bir proje klasöründe php, composer, node, npm ve npx projenin sürümlerini kullanır. Projelerin dışında sistem araçları kullanılır."
+            }
+            Self::Greek => {
+                "Στον φάκελο ενός έργου, τα php, composer, node, npm και npx χρησιμοποιούν τις εκδόσεις του έργου. Εκτός έργων χρησιμοποιούνται τα εργαλεία του συστήματος."
+            }
+            Self::Hindi => {
+                "किसी प्रोजेक्ट फ़ोल्डर में php, composer, node, npm और npx प्रोजेक्ट के संस्करणों का उपयोग करते हैं। प्रोजेक्ट के बाहर सिस्टम टूल का उपयोग होता है।"
+            }
+            Self::Chinese => {
+                "在项目文件夹中，php、composer、node、npm 和 npx 使用项目配置的版本。项目之外使用系统工具。"
+            }
+            Self::Swedish => {
+                "I en projektmapp använder php, composer, node, npm och npx projektets versioner. Utanför projekt används systemverktygen."
+            }
+        }
+    }
+
+    pub fn settings_shell_reload_body(self) -> &'static str {
+        match self {
+            Self::English => {
+                "The shims are installed. Open a new terminal to load them in that session."
+            }
+            Self::Italiano => {
+                "Gli shim sono installati. Apri un nuovo terminale per caricarli in quella sessione."
+            }
+            Self::Shqip => {
+                "Shim-t janë instaluar. Hap një terminal të ri për t'i ngarkuar në atë sesion."
+            }
+            Self::Spanish => {
+                "Los shims están instalados. Abre un terminal nuevo para cargarlos en esa sesión."
+            }
+            Self::French => {
+                "Les shims sont installés. Ouvrez un nouveau terminal pour les charger dans cette session."
+            }
+            Self::Portuguese => {
+                "Os shims estão instalados. Abra um novo terminal para carregá-los nessa sessão."
+            }
+            Self::Russian => {
+                "Шимы установлены. Откройте новый терминал, чтобы загрузить их в этом сеансе."
+            }
+            Self::Polish => {
+                "Shimy są zainstalowane. Otwórz nowy terminal, aby załadować je w tej sesji."
+            }
+            Self::Ukrainian => {
+                "Шими встановлено. Відкрийте новий термінал, щоб завантажити їх у цьому сеансі."
+            }
+            Self::Turkish => "Shim'ler kuruldu. Bu oturumda yüklemek için yeni bir terminal açın.",
+            Self::Greek => {
+                "Τα shims έχουν εγκατασταθεί. Ανοίξτε νέο τερματικό για να φορτωθούν σε αυτή τη συνεδρία."
+            }
+            Self::Hindi => "शिम इंस्टॉल हैं। उस सत्र में लोड करने के लिए नया टर्मिनल खोलें।",
+            Self::Chinese => "Shim 已安装。请打开新终端以在该会话中加载。",
+            Self::Swedish => {
+                "Shimarna är installerade. Öppna en ny terminal för att läsa in dem i den sessionen."
+            }
+        }
+    }
+
+    pub fn settings_shell_inactive_body(self) -> &'static str {
+        match self {
+            Self::English => {
+                "Install the shims to run project tools from any terminal without a localweb prefix. Setup installs them by default."
+            }
+            Self::Italiano => {
+                "Installa gli shim per usare gli strumenti del progetto da qualsiasi terminale senza il prefisso localweb. Il setup li installa per impostazione predefinita."
+            }
+            Self::Shqip => {
+                "Instalo shim-t për të përdorur mjetet e projektit nga çdo terminal pa prefiksin localweb. Konfigurimi fillestar i instalon ato si parazgjedhje."
+            }
+            Self::Spanish => {
+                "Instala los shims para usar las herramientas del proyecto desde cualquier terminal sin el prefijo localweb. La configuración inicial los instala de forma predeterminada."
+            }
+            Self::French => {
+                "Installez les shims pour utiliser les outils du projet depuis n’importe quel terminal sans le préfixe localweb. La configuration initiale les installe par défaut."
+            }
+            Self::Portuguese => {
+                "Instale os shims para usar as ferramentas do projeto em qualquer terminal sem o prefixo localweb. A configuração inicial os instala por padrão."
+            }
+            Self::Russian => {
+                "Установите шимы, чтобы запускать инструменты проекта из любого терминала без префикса localweb. Первичная настройка устанавливает их по умолчанию."
+            }
+            Self::Polish => {
+                "Zainstaluj shimy, aby używać narzędzi projektu z dowolnego terminala bez prefiksu localweb. Konfiguracja wstępna instaluje je domyślnie."
+            }
+            Self::Ukrainian => {
+                "Встановіть шими, щоб запускати інструменти проєкту з будь-якого термінала без префікса localweb. Початкове налаштування встановлює їх типово."
+            }
+            Self::Turkish => {
+                "Proje araçlarını localweb öneki olmadan her terminalden çalıştırmak için shim'leri kurun. İlk kurulum bunları varsayılan olarak kurar."
+            }
+            Self::Greek => {
+                "Εγκαταστήστε τα shims για να χρησιμοποιείτε τα εργαλεία του έργου από οποιοδήποτε τερματικό χωρίς το πρόθεμα localweb. Η αρχική ρύθμιση τα εγκαθιστά από προεπιλογή."
+            }
+            Self::Hindi => {
+                "localweb उपसर्ग के बिना किसी भी टर्मिनल से प्रोजेक्ट टूल चलाने के लिए शिम इंस्टॉल करें। सेटअप उन्हें डिफ़ॉल्ट रूप से इंस्टॉल करता है।"
+            }
+            Self::Chinese => {
+                "安装 Shim 后，可在任意终端运行项目工具，无需 localweb 前缀。初始设置会默认安装。"
+            }
+            Self::Swedish => {
+                "Installera shimarna för att köra projektverktyg från vilken terminal som helst utan localweb-prefixet. Den inledande konfigurationen installerar dem som standard."
+            }
+        }
+    }
+
+    pub fn settings_shell_install(self) -> &'static str {
+        match self {
+            Self::English => "Install shell integration",
+            Self::Italiano => "Installa integrazione shell",
+            Self::Shqip => "Instalo integrimin e shell-it",
+            Self::Spanish => "Instalar integración con la shell",
+            Self::French => "Installer l’intégration au shell",
+            Self::Portuguese => "Instalar integração com o shell",
+            Self::Russian => "Установить интеграцию с оболочкой",
+            Self::Polish => "Zainstaluj integrację z powłoką",
+            Self::Ukrainian => "Встановити інтеграцію з оболонкою",
+            Self::Turkish => "Kabuk entegrasyonunu kur",
+            Self::Greek => "Εγκατάσταση ενσωμάτωσης κελύφους",
+            Self::Hindi => "शेल इंटीग्रेशन इंस्टॉल करें",
+            Self::Chinese => "安装 Shell 集成",
+            Self::Swedish => "Installera skalsintegration",
+        }
+    }
+
+    pub fn settings_shell_reinstall(self) -> &'static str {
+        match self {
+            Self::English => "Reinstall",
+            Self::Italiano => "Reinstalla",
+            Self::Shqip => "Rinstalo",
+            Self::Spanish | Self::Portuguese => "Reinstalar",
+            Self::French => "Réinstaller",
+            Self::Russian => "Переустановить",
+            Self::Polish => "Zainstaluj ponownie",
+            Self::Ukrainian => "Перевстановити",
+            Self::Turkish => "Yeniden kur",
+            Self::Greek => "Επανεγκατάσταση",
+            Self::Hindi => "फिर से इंस्टॉल करें",
+            Self::Chinese => "重新安装",
+            Self::Swedish => "Installera om",
+        }
+    }
+
+    pub fn settings_shell_remove(self) -> &'static str {
+        match self {
+            Self::English => "Remove integration",
+            Self::Italiano => "Rimuovi integrazione",
+            Self::Shqip => "Hiq integrimin",
+            Self::Spanish => "Quitar integración",
+            Self::French => "Supprimer l’intégration",
+            Self::Portuguese => "Remover integração",
+            Self::Russian => "Удалить интеграцию",
+            Self::Polish => "Usuń integrację",
+            Self::Ukrainian => "Видалити інтеграцію",
+            Self::Turkish => "Entegrasyonu kaldır",
+            Self::Greek => "Αφαίρεση ενσωμάτωσης",
+            Self::Hindi => "इंटीग्रेशन हटाएँ",
+            Self::Chinese => "移除集成",
+            Self::Swedish => "Ta bort integration",
+        }
+    }
+
+    pub fn settings_shell_shim_dir(self) -> &'static str {
+        match self {
+            Self::English => "Shim folder",
+            Self::Italiano => "Cartella shim",
+            Self::Shqip => "Dosja e shim-eve",
+            Self::Spanish => "Carpeta de shims",
+            Self::French => "Dossier des shims",
+            Self::Portuguese => "Pasta dos shims",
+            Self::Russian => "Папка шимов",
+            Self::Polish => "Folder shimów",
+            Self::Ukrainian => "Тека шимів",
+            Self::Turkish => "Shim klasörü",
+            Self::Greek => "Φάκελος shims",
+            Self::Hindi => "शिम फ़ोल्डर",
+            Self::Chinese => "Shim 文件夹",
+            Self::Swedish => "Shimmapp",
+        }
+    }
+
+    pub fn settings_shell_startup_file(self) -> &'static str {
+        match self {
+            Self::English => "Startup file",
+            Self::Italiano => "File di avvio",
+            Self::Shqip => "Skedari i nisjes",
+            Self::Spanish => "Archivo de inicio",
+            Self::French => "Fichier de démarrage",
+            Self::Portuguese => "Arquivo de inicialização",
+            Self::Russian => "Файл запуска",
+            Self::Polish => "Plik startowy",
+            Self::Ukrainian => "Файл запуску",
+            Self::Turkish => "Başlangıç dosyası",
+            Self::Greek => "Αρχείο εκκίνησης",
+            Self::Hindi => "स्टार्टअप फ़ाइल",
+            Self::Chinese => "启动文件",
+            Self::Swedish => "Startfil",
+        }
+    }
+
+    pub fn settings_shell_user_path(self) -> &'static str {
+        match self {
+            Self::English => "User PATH",
+            Self::Italiano => "PATH utente",
+            Self::Shqip => "PATH i përdoruesit",
+            Self::Spanish => "PATH del usuario",
+            Self::French => "PATH utilisateur",
+            Self::Portuguese => "PATH do usuário",
+            Self::Russian => "PATH пользователя",
+            Self::Polish => "PATH użytkownika",
+            Self::Ukrainian => "PATH користувача",
+            Self::Turkish => "Kullanıcı PATH'i",
+            Self::Greek => "PATH χρήστη",
+            Self::Hindi => "उपयोगकर्ता PATH",
+            Self::Chinese => "用户 PATH",
+            Self::Swedish => "Användarens PATH",
+        }
+    }
+
+    pub fn settings_shell_path_now(self) -> &'static str {
+        match self {
+            Self::English => "This session",
+            Self::Italiano => "Questa sessione",
+            Self::Shqip => "Ky sesion",
+            Self::Spanish => "Esta sesión",
+            Self::French => "Cette session",
+            Self::Portuguese => "Esta sessão",
+            Self::Russian => "Этот сеанс",
+            Self::Polish => "Ta sesja",
+            Self::Ukrainian => "Цей сеанс",
+            Self::Turkish => "Bu oturum",
+            Self::Greek => "Αυτή η συνεδρία",
+            Self::Hindi => "यह सत्र",
+            Self::Chinese => "当前会话",
+            Self::Swedish => "Den här sessionen",
+        }
+    }
+
+    pub fn settings_shell_loaded(self) -> &'static str {
+        match self {
+            Self::English => "Loaded",
+            Self::Italiano => "Caricato",
+            Self::Shqip => "I ngarkuar",
+            Self::Spanish => "Cargado",
+            Self::French => "Chargé",
+            Self::Portuguese => "Carregado",
+            Self::Russian => "Загружен",
+            Self::Polish => "Załadowany",
+            Self::Ukrainian => "Завантажено",
+            Self::Turkish => "Yüklendi",
+            Self::Greek => "Φορτώθηκε",
+            Self::Hindi => "लोड है",
+            Self::Chinese => "已加载",
+            Self::Swedish => "Inläst",
+        }
+    }
+
+    pub fn settings_shell_not_loaded(self) -> &'static str {
+        match self {
+            Self::English => "Not loaded",
+            Self::Italiano => "Non caricato",
+            Self::Shqip => "Nuk është ngarkuar",
+            Self::Spanish => "No cargado",
+            Self::French => "Non chargé",
+            Self::Portuguese => "Não carregado",
+            Self::Russian => "Не загружен",
+            Self::Polish => "Nie załadowany",
+            Self::Ukrainian => "Не завантажено",
+            Self::Turkish => "Yüklenmedi",
+            Self::Greek => "Δεν φορτώθηκε",
+            Self::Hindi => "लोड नहीं है",
+            Self::Chinese => "未加载",
+            Self::Swedish => "Inte inläst",
+        }
+    }
+
+    pub fn settings_shell_read_error(self) -> &'static str {
+        match self {
+            Self::English => "Could not read the shell integration status",
+            Self::Italiano => "Impossibile leggere lo stato dell'integrazione shell",
+            Self::Shqip => "Statusi i integrimit të shell-it nuk mund të lexohej",
+            Self::Spanish => "No se pudo leer el estado de la integración con la shell",
+            Self::French => "Impossible de lire l’état de l’intégration au shell",
+            Self::Portuguese => "Não foi possível ler o estado da integração com o shell",
+            Self::Russian => "Не удалось прочитать состояние интеграции с оболочкой",
+            Self::Polish => "Nie można odczytać stanu integracji z powłoką",
+            Self::Ukrainian => "Не вдалося прочитати стан інтеграції з оболонкою",
+            Self::Turkish => "Kabuk entegrasyonu durumu okunamadı",
+            Self::Greek => "Δεν ήταν δυνατή η ανάγνωση της κατάστασης ενσωμάτωσης κελύφους",
+            Self::Hindi => "शेल इंटीग्रेशन स्थिति पढ़ी नहीं जा सकी",
+            Self::Chinese => "无法读取 Shell 集成状态",
+            Self::Swedish => "Det gick inte att läsa skalsintegrationens status",
+        }
+    }
+
+    pub fn settings_shell_remove_title(self) -> &'static str {
+        match self {
+            Self::English => "Remove shell integration?",
+            Self::Italiano => "Rimuovere l'integrazione shell?",
+            Self::Shqip => "Të hiqet integrimi i shell-it?",
+            Self::Spanish => "¿Quitar la integración con la shell?",
+            Self::French => "Supprimer l’intégration au shell ?",
+            Self::Portuguese => "Remover a integração com o shell?",
+            Self::Russian => "Удалить интеграцию с оболочкой?",
+            Self::Polish => "Usunąć integrację z powłoką?",
+            Self::Ukrainian => "Видалити інтеграцію з оболонкою?",
+            Self::Turkish => "Kabuk entegrasyonu kaldırılsın mı?",
+            Self::Greek => "Αφαίρεση της ενσωμάτωσης κελύφους;",
+            Self::Hindi => "शेल इंटीग्रेशन हटाएँ?",
+            Self::Chinese => "移除 Shell 集成？",
+            Self::Swedish => "Ta bort skalsintegrationen?",
+        }
+    }
+
+    pub fn settings_shell_remove_body(self) -> &'static str {
+        match self {
+            Self::English => {
+                "The shims and the LocalWeb block in the shell startup file will be removed. Project runtimes remain available through localweb commands and the desktop app."
+            }
+            Self::Italiano => {
+                "Verranno rimossi gli shim e il blocco LocalWeb nel file di avvio della shell. I runtime dei progetti restano disponibili tramite i comandi localweb e l'app desktop."
+            }
+            Self::Shqip => {
+                "Shim-t dhe blloku LocalWeb në skedarin e nisjes së shell-it do të hiqen. Runtime-t e projekteve mbeten të disponueshme përmes komandave localweb dhe aplikacionit desktop."
+            }
+            Self::Spanish => {
+                "Se quitarán los shims y el bloque de LocalWeb del archivo de inicio de la shell. Los runtimes de los proyectos siguen disponibles mediante los comandos localweb y la aplicación de escritorio."
+            }
+            Self::French => {
+                "Les shims et le bloc LocalWeb du fichier de démarrage du shell seront supprimés. Les runtimes des projets restent disponibles via les commandes localweb et l’application de bureau."
+            }
+            Self::Portuguese => {
+                "Os shims e o bloco LocalWeb no arquivo de inicialização do shell serão removidos. Os runtimes dos projetos continuam disponíveis pelos comandos localweb e pelo aplicativo desktop."
+            }
+            Self::Russian => {
+                "Шимы и блок LocalWeb в файле запуска оболочки будут удалены. Среды проектов останутся доступны через команды localweb и настольное приложение."
+            }
+            Self::Polish => {
+                "Shimy i blok LocalWeb w pliku startowym powłoki zostaną usunięte. Środowiska projektów pozostaną dostępne przez polecenia localweb i aplikację desktopową."
+            }
+            Self::Ukrainian => {
+                "Шими та блок LocalWeb у файлі запуску оболонки буде видалено. Середовища проєктів залишаться доступними через команди localweb і настільний застосунок."
+            }
+            Self::Turkish => {
+                "Shim'ler ve kabuk başlangıç dosyasındaki LocalWeb bloğu kaldırılacak. Proje çalışma ortamları localweb komutları ve masaüstü uygulamasıyla kullanılabilir kalır."
+            }
+            Self::Greek => {
+                "Τα shims και το μπλοκ LocalWeb στο αρχείο εκκίνησης του κελύφους θα αφαιρεθούν. Τα περιβάλλοντα έργων παραμένουν διαθέσιμα μέσω εντολών localweb και της εφαρμογής επιφάνειας εργασίας."
+            }
+            Self::Hindi => {
+                "शिम और शेल स्टार्टअप फ़ाइल में LocalWeb ब्लॉक हटा दिए जाएँगे। प्रोजेक्ट रनटाइम localweb कमांड और डेस्कटॉप ऐप से उपलब्ध रहेंगे।"
+            }
+            Self::Chinese => {
+                "将移除 Shim 以及 Shell 启动文件中的 LocalWeb 区块。项目运行时仍可通过 localweb 命令和桌面应用使用。"
+            }
+            Self::Swedish => {
+                "Shimarna och LocalWeb-blocket i skalets startfil tas bort. Projektens körmiljöer är fortfarande tillgängliga via localweb-kommandon och skrivbordsappen."
+            }
+        }
+    }
+
+    pub fn notice_shell_installed(self) -> &'static str {
+        match self {
+            Self::English => "Shell integration installed. Open a new terminal to use it.",
+            Self::Italiano => "Integrazione shell installata. Apri un nuovo terminale per usarla.",
+            Self::Shqip => {
+                "Integrimi i shell-it u instalua. Hap një terminal të ri për ta përdorur."
+            }
+            Self::Spanish => {
+                "Integración con la shell instalada. Abre un terminal nuevo para usarla."
+            }
+            Self::French => {
+                "Intégration au shell installée. Ouvrez un nouveau terminal pour l’utiliser."
+            }
+            Self::Portuguese => {
+                "Integração com o shell instalada. Abra um novo terminal para usá-la."
+            }
+            Self::Russian => {
+                "Интеграция с оболочкой установлена. Откройте новый терминал, чтобы использовать её."
+            }
+            Self::Polish => {
+                "Integracja z powłoką zainstalowana. Otwórz nowy terminal, aby jej użyć."
+            }
+            Self::Ukrainian => {
+                "Інтеграцію з оболонкою встановлено. Відкрийте новий термінал, щоб скористатися нею."
+            }
+            Self::Turkish => "Kabuk entegrasyonu kuruldu. Kullanmak için yeni bir terminal açın.",
+            Self::Greek => {
+                "Η ενσωμάτωση κελύφους εγκαταστάθηκε. Ανοίξτε νέο τερματικό για να τη χρησιμοποιήσετε."
+            }
+            Self::Hindi => "शेल इंटीग्रेशन इंस्टॉल हो गया। उपयोग के लिए नया टर्मिनल खोलें।",
+            Self::Chinese => "Shell 集成已安装。请打开新终端以使用。",
+            Self::Swedish => {
+                "Skalsintegrationen installerades. Öppna en ny terminal för att använda den."
+            }
+        }
+    }
+
+    pub fn notice_shell_removed(self) -> &'static str {
+        match self {
+            Self::English => "Shell integration removed.",
+            Self::Italiano => "Integrazione shell rimossa.",
+            Self::Shqip => "Integrimi i shell-it u hoq.",
+            Self::Spanish => "Integración con la shell eliminada.",
+            Self::French => "Intégration au shell supprimée.",
+            Self::Portuguese => "Integração com o shell removida.",
+            Self::Russian => "Интеграция с оболочкой удалена.",
+            Self::Polish => "Integracja z powłoką usunięta.",
+            Self::Ukrainian => "Інтеграцію з оболонкою видалено.",
+            Self::Turkish => "Kabuk entegrasyonu kaldırıldı.",
+            Self::Greek => "Η ενσωμάτωση κελύφους αφαιρέθηκε.",
+            Self::Hindi => "शेल इंटीग्रेशन हटा दिया गया।",
+            Self::Chinese => "Shell 集成已移除。",
+            Self::Swedish => "Skalsintegrationen togs bort.",
+        }
+    }
 }

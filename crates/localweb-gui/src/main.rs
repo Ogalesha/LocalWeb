@@ -11,7 +11,7 @@ use icons::Icon;
 use lang::Lang;
 use localweb_core::{
     CaStatus, Cache, Database, GlobalConfig, NewProject, Paths, Profile, Project, ProjectStatus,
-    Request, Response, Status, SupervisorConfig, WebServer,
+    Request, Response, ShellIntegrationStatus, Status, SupervisorConfig, WebServer,
     database::{DatabaseOperationResult, DatabaseSnapshot, SnapshotSelector},
     default_supervisor_command, detect_profile, sanitize_name, send_request,
 };
@@ -264,8 +264,11 @@ enum Action {
     RefreshStatus,
     LoadProjects,
     LoadCa,
+    LoadShellIntegration,
     Setup,
     InstallCa,
+    InstallShellIntegration,
+    RemoveShellIntegration,
     StartDaemon,
     Shutdown,
     AddProject,
@@ -291,6 +294,7 @@ impl Action {
             Self::RefreshStatus => requests::Query::Status,
             Self::LoadProjects => requests::Query::Projects,
             Self::LoadCa => requests::Query::Certificate,
+            Self::LoadShellIntegration => requests::Query::ShellIntegration,
             Self::LoadEnvironment(name) => requests::Query::Environment(name.clone()),
             Self::LoadSnapshots(name) => requests::Query::Snapshots(name.clone()),
             _ => return None,
@@ -303,6 +307,7 @@ impl Action {
             Self::RefreshStatus
                 | Self::LoadProjects
                 | Self::LoadCa
+                | Self::LoadShellIntegration
                 | Self::LoadEnvironment(_)
                 | Self::LoadSnapshots(_)
         )
@@ -408,6 +413,8 @@ struct LocalWebApp {
     projects_loaded: bool,
     projects_error: Option<String>,
     ca_error: Option<String>,
+    shell_integration: Option<ShellIntegrationStatus>,
+    shell_integration_error: Option<String>,
     mcp_path: Option<PathBuf>,
     project_search: String,
     form: AddProjectForm,
@@ -415,6 +422,7 @@ struct LocalWebApp {
     queued_add: Option<NewProject>,
     picker: Option<DirectoryPicker>,
     remove_confirmation: Option<String>,
+    shell_remove_confirmation: bool,
     stop_confirmation: bool,
     details: Option<String>,
     environment: Option<BTreeMap<String, String>>,
@@ -459,6 +467,7 @@ impl LocalWebApp {
         app.brand_texture = brand::icon_texture(&context.egui_ctx);
         app.logo_texture = brand::logo_texture(&context.egui_ctx);
         app.refresh_all();
+        app.refresh_shell_integration();
         app
     }
 
@@ -479,6 +488,8 @@ impl LocalWebApp {
             projects_loaded: false,
             projects_error: None,
             ca_error: None,
+            shell_integration: None,
+            shell_integration_error: None,
             mcp_path: find_program("localweb-mcp"),
             project_search: String::new(),
             form: AddProjectForm::default(),
@@ -486,6 +497,7 @@ impl LocalWebApp {
             queued_add: None,
             picker: None,
             remove_confirmation: None,
+            shell_remove_confirmation: false,
             stop_confirmation: false,
             details: None,
             environment: None,
@@ -565,6 +577,22 @@ impl LocalWebApp {
 
     fn run_command(&mut self, action: Action, program: PathBuf, args: Vec<String>) {
         let ticket = self.requests.begin(None);
+        self.spawn_command(ticket, action, program, args);
+    }
+
+    /// Runs a read-only CLI query without blocking mutations or the UI.
+    fn run_query_command(&mut self, action: Action, program: PathBuf, args: Vec<String>) {
+        let ticket = self.requests.begin(action.query());
+        self.spawn_command(ticket, action, program, args);
+    }
+
+    fn spawn_command(
+        &mut self,
+        ticket: requests::Ticket,
+        action: Action,
+        program: PathBuf,
+        args: Vec<String>,
+    ) {
         let sender = self.sender.clone();
         thread::spawn(move || {
             let result = tokio::runtime::Builder::new_current_thread().enable_all().build()
@@ -587,6 +615,48 @@ impl LocalWebApp {
                 result,
             });
         });
+    }
+
+    fn refresh_shell_integration(&mut self) {
+        match localweb_cli_path() {
+            Ok(program) => self.run_query_command(
+                Action::LoadShellIntegration,
+                program,
+                vec!["integration".into(), "status".into(), "--json".into()],
+            ),
+            Err(error) => {
+                self.shell_integration = None;
+                self.shell_integration_error = Some(error);
+            }
+        }
+    }
+
+    fn install_shell_integration(&mut self) {
+        if self.requests.foreground_pending() != 0 {
+            return;
+        }
+        match localweb_cli_path() {
+            Ok(program) => self.run_command(
+                Action::InstallShellIntegration,
+                program,
+                vec!["integration".into(), "install".into()],
+            ),
+            Err(error) => self.notice = Some(Notice::error(error)),
+        }
+    }
+
+    fn remove_shell_integration(&mut self) {
+        if self.requests.foreground_pending() != 0 {
+            return;
+        }
+        match localweb_cli_path() {
+            Ok(program) => self.run_command(
+                Action::RemoveShellIntegration,
+                program,
+                vec!["integration".into(), "remove".into()],
+            ),
+            Err(error) => self.notice = Some(Notice::error(error)),
+        }
     }
 
     fn receive_events(&mut self) {
@@ -860,11 +930,39 @@ impl LocalWebApp {
         match (action, result) {
             (Action::Setup, Ok(_)) => {
                 self.notice = Some(Notice::success(self.lang.notice_setup()));
+                self.refresh_shell_integration();
                 self.start_daemon();
             }
             (Action::InstallCa, Ok(_)) => {
                 self.notice = Some(Notice::success(self.lang.notice_ca()));
                 self.request(Action::LoadCa, Request::CaStatus);
+            }
+            (Action::LoadShellIntegration, Ok(output)) => {
+                match serde_json::from_str::<ShellIntegrationStatus>(&output) {
+                    Ok(status) => {
+                        self.shell_integration = Some(status);
+                        self.shell_integration_error = None;
+                    }
+                    Err(error) => {
+                        self.shell_integration = None;
+                        self.shell_integration_error = Some(format!(
+                            "{}: {error}",
+                            self.lang.settings_shell_read_error()
+                        ));
+                    }
+                }
+            }
+            (Action::LoadShellIntegration, Err(error)) => {
+                self.shell_integration = None;
+                self.shell_integration_error = Some(error);
+            }
+            (Action::InstallShellIntegration, Ok(_)) => {
+                self.notice = Some(Notice::success(self.lang.notice_shell_installed()));
+                self.refresh_shell_integration();
+            }
+            (Action::RemoveShellIntegration, Ok(_)) => {
+                self.notice = Some(Notice::success(self.lang.notice_shell_removed()));
+                self.refresh_shell_integration();
             }
             (Action::StartDaemon, Ok(_)) => {
                 self.daemon = self.daemon.after_start_ok();
@@ -1543,6 +1641,8 @@ impl LocalWebApp {
         ui.add_space(24.0);
         self.settings_environment(ui);
         ui.add_space(24.0);
+        self.settings_shell(ui);
+        ui.add_space(24.0);
         self.settings_maintenance(ui);
         ui.add_space(28.0);
         brand::logo(ui, self.logo_texture.as_ref(), 168.0);
@@ -1700,6 +1800,175 @@ impl LocalWebApp {
                         }
                         ui.end_row();
                     });
+            });
+    }
+
+    #[expect(
+        clippy::too_many_lines,
+        reason = "status, paths and actions share one card so every state stays visible together"
+    )]
+    fn settings_shell(&mut self, ui: &mut egui::Ui) {
+        let lang = self.lang;
+        section_heading(ui, lang.settings_shell_title(), lang.settings_shell_body());
+        ui.add_space(10.0);
+        let status = self.shell_integration.clone();
+        let error = self.shell_integration_error.clone();
+        let complete = status
+            .as_ref()
+            .is_some_and(|status| status.shims_installed && status.shell_configured);
+        let ready = status.as_ref().is_some_and(ShellIntegrationStatus::ready);
+        let partial = status
+            .as_ref()
+            .is_some_and(|status| status.shims_installed || status.shell_configured);
+        let (icon, background, foreground) = if error.is_some() {
+            (Icon::Warning, DANGER_SOFT, DANGER)
+        } else if ready {
+            (Icon::Check, SUCCESS_SOFT, SUCCESS)
+        } else if complete {
+            (Icon::Check, ACCENT_SOFT, ACCENT_TEXT)
+        } else {
+            (Icon::Terminal, SURFACE_MUTED, INK_MUTED)
+        };
+        let title = if error.is_some() {
+            lang.settings_shell_unavailable()
+        } else if status.is_none() {
+            lang.settings_shell_checking()
+        } else if ready {
+            lang.settings_shell_active()
+        } else if complete {
+            lang.settings_shell_new_terminal()
+        } else if partial {
+            lang.settings_shell_incomplete()
+        } else {
+            lang.settings_shell_inactive()
+        };
+        let body = if let Some(error) = &error {
+            error.as_str()
+        } else if status.is_none() {
+            lang.settings_shell_checking()
+        } else if ready {
+            lang.settings_shell_ready_body()
+        } else if complete {
+            lang.settings_shell_reload_body()
+        } else {
+            lang.settings_shell_inactive_body()
+        };
+        card_frame()
+            .inner_margin(egui::Margin::symmetric(20, 18))
+            .show(ui, |ui| {
+                ui.set_min_width(ui.available_width());
+                ui.horizontal(|ui| {
+                    icon_tile(ui, icon, background, foreground, 42.0);
+                    ui.add_space(4.0);
+                    ui.vertical(|ui| {
+                        ui.label(strong(title).size(BODY_SIZE).color(if error.is_some() {
+                            DANGER
+                        } else {
+                            INK
+                        }));
+                        ui.add(
+                            egui::Label::new(RichText::new(body).size(SMALL_SIZE).color(INK_MUTED))
+                                .wrap(),
+                        );
+                    });
+                });
+                if let Some(status) = &status {
+                    ui.add_space(14.0);
+                    egui::Grid::new("settings_shell_details")
+                        .num_columns(2)
+                        .spacing([28.0, 12.0])
+                        .show(ui, |ui| {
+                            settings_label(ui, lang.settings_shell_shim_dir());
+                            let dir = status.shim_dir.display().to_string();
+                            ui.add(
+                                egui::Label::new(
+                                    RichText::new(truncate_middle(&dir, 54))
+                                        .monospace()
+                                        .size(MONO_SIZE)
+                                        .color(INK_MUTED),
+                                )
+                                .truncate(),
+                            )
+                            .on_hover_text(dir);
+                            ui.end_row();
+
+                            settings_label(ui, lang.settings_shell_startup_file());
+                            if let Some(file) = &status.shell_file {
+                                let file = file.display().to_string();
+                                ui.add(
+                                    egui::Label::new(
+                                        RichText::new(truncate_middle(&file, 54))
+                                            .monospace()
+                                            .size(MONO_SIZE)
+                                            .color(INK_MUTED),
+                                    )
+                                    .truncate(),
+                                )
+                                .on_hover_text(file);
+                            } else {
+                                ui.label(
+                                    RichText::new(lang.settings_shell_user_path())
+                                        .size(MONO_SIZE)
+                                        .color(INK_MUTED),
+                                );
+                            }
+                            ui.end_row();
+
+                            settings_label(ui, lang.settings_shell_path_now());
+                            ui.label(
+                                RichText::new(if status.path_active {
+                                    lang.settings_shell_loaded()
+                                } else {
+                                    lang.settings_shell_not_loaded()
+                                })
+                                .size(LABEL_SIZE)
+                                .color(if status.path_active { SUCCESS } else { WARNING }),
+                            );
+                            ui.end_row();
+                        });
+                    ui.add_space(12.0);
+                }
+                let known = status.is_some() || error.is_some();
+                let busy = self.requests.foreground_pending() != 0;
+                ui.horizontal_wrapped(|ui| {
+                    if complete {
+                        if Pill::new(lang.settings_shell_reinstall(), PillKind::Secondary)
+                            .icon(Icon::Refresh)
+                            .height(36.0)
+                            .enabled(!busy)
+                            .show(ui)
+                            .clicked()
+                        {
+                            self.install_shell_integration();
+                        }
+                        if Pill::new(lang.settings_shell_remove(), PillKind::GhostDanger)
+                            .icon(Icon::Trash)
+                            .height(36.0)
+                            .enabled(!busy)
+                            .show(ui)
+                            .clicked()
+                        {
+                            self.shell_remove_confirmation = true;
+                        }
+                    } else if Pill::new(lang.settings_shell_install(), PillKind::Primary)
+                        .icon(Icon::Download)
+                        .height(36.0)
+                        .enabled(!busy && known)
+                        .show(ui)
+                        .clicked()
+                    {
+                        self.install_shell_integration();
+                    }
+                    if Pill::new(lang.refresh(), PillKind::Ghost)
+                        .icon(Icon::Refresh)
+                        .height(36.0)
+                        .enabled(self.requests.background_pending() == 0)
+                        .show(ui)
+                        .clicked()
+                    {
+                        self.refresh_shell_integration();
+                    }
+                });
             });
     }
 
@@ -3492,6 +3761,42 @@ impl LocalWebApp {
         }
     }
 
+    fn shell_remove_dialog(&mut self, context: &egui::Context) {
+        if !self.shell_remove_confirmation {
+            return;
+        }
+        let lang = self.lang;
+        let modal =
+            egui::Modal::new(egui::Id::new("remove_shell_integration")).show(context, |ui| {
+                ui.label(strong(lang.settings_shell_remove_title()).size(SECTION_TITLE_SIZE));
+                ui.add_space(4.0);
+                ui.label(RichText::new(lang.settings_shell_remove_body()).color(INK_MUTED));
+                ui.add_space(14.0);
+                ui.horizontal(|ui| {
+                    if Pill::new(lang.cancel(), PillKind::Ghost)
+                        .height(36.0)
+                        .show(ui)
+                        .clicked()
+                    {
+                        self.shell_remove_confirmation = false;
+                    }
+                    if Pill::new(lang.settings_shell_remove(), PillKind::Danger)
+                        .icon(Icon::Trash)
+                        .height(36.0)
+                        .enabled(self.requests.foreground_pending() == 0)
+                        .show(ui)
+                        .clicked()
+                    {
+                        self.shell_remove_confirmation = false;
+                        self.remove_shell_integration();
+                    }
+                });
+            });
+        if modal.should_close() && self.requests.foreground_pending() == 0 {
+            self.shell_remove_confirmation = false;
+        }
+    }
+
     fn stop_dialog(&mut self, context: &egui::Context) {
         if !self.stop_confirmation {
             return;
@@ -3649,6 +3954,9 @@ impl eframe::App for LocalWebApp {
             }
             self.last_refresh = Instant::now();
         }
+        if self.view == View::Settings && self.last_view != View::Settings {
+            self.refresh_shell_integration();
+        }
         if self.last_view != self.view {
             self.last_view = self.view;
             self.view_changed_at = Some(Instant::now());
@@ -3690,6 +3998,7 @@ impl eframe::App for LocalWebApp {
             }
         }
         self.remove_dialog(&context);
+        self.shell_remove_dialog(&context);
         self.stop_dialog(&context);
         self.database_dialog_ui(&context);
         self.database_confirm_ui(&context);
@@ -4598,6 +4907,24 @@ mod tests {
     }
 
     #[test]
+    fn shell_integration_status_moves_from_json_to_settings_state() {
+        let mut app = LocalWebApp::state(None, Lang::English, None);
+        let json = r#"{"shim_dir":"/home/dev/.local/share/localweb/bin","shims_installed":true,"missing_tools":[],"path_active":true,"shell_configured":true,"shell_file":"/home/dev/.zshrc"}"#;
+        app.handle_command(Action::LoadShellIntegration, Ok(json.into()));
+        let stored = app.shell_integration.as_ref().expect("status is stored");
+        assert!(stored.ready());
+        assert!(stored.missing_tools.is_empty());
+        assert_eq!(
+            stored.shell_file.as_deref(),
+            Some(Path::new("/home/dev/.zshrc"))
+        );
+
+        app.handle_command(Action::LoadShellIntegration, Ok("not json".into()));
+        assert!(app.shell_integration.is_none());
+        assert!(app.shell_integration_error.is_some());
+    }
+
+    #[test]
     fn startup_deadline_recovers_controls_after_daemon_disappears() {
         let mut app = LocalWebApp::state(None, Lang::English, None);
         app.daemon = DaemonState::Starting;
@@ -5224,6 +5551,8 @@ mod tests {
                 View::Settings,
                 4000.0,
                 &[
+                    lang.settings_shell_title(),
+                    lang.settings_shell_install(),
                     lang.maintenance_title(),
                     lang.refresh(),
                     lang.sync_domains(),

@@ -1598,6 +1598,37 @@ pub struct CaStatus {
     pub certificate: PathBuf,
 }
 
+/// State of the per-account shell integration.
+///
+/// The shims make `php`, `composer`, `node`, `npm` and `npx` follow the
+/// project containing the current directory. The status is shared by
+/// `localweb integration status --json` and the desktop Settings view.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ShellIntegrationStatus {
+    /// Directory containing the generated tool shims.
+    pub shim_dir: PathBuf,
+    /// Whether every shim exists.
+    pub shims_installed: bool,
+    /// Tools whose shim is missing.
+    #[serde(default)]
+    pub missing_tools: Vec<String>,
+    /// Whether the current process sees the shim directory on `PATH`.
+    pub path_active: bool,
+    /// Whether the login shell or user `PATH` is configured to load the shims.
+    pub shell_configured: bool,
+    /// Shell startup file that owns the managed block, if the platform has one.
+    #[serde(default)]
+    pub shell_file: Option<PathBuf>,
+}
+
+impl ShellIntegrationStatus {
+    /// Whether a new terminal will route project tools through `LocalWeb`.
+    #[must_use]
+    pub fn ready(&self) -> bool {
+        self.shims_installed && self.shell_configured && self.path_active
+    }
+}
+
 /// Daemon and gateway health counters.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Status {
