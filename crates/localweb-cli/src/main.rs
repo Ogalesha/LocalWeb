@@ -22,8 +22,10 @@ use std::{
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
-/// How long `localweb start` waits for project restoration before reporting an error.
-const STARTUP_READY_TIMEOUT: Duration = Duration::from_secs(60);
+/// How long `localweb start` waits without any status reply before reporting
+/// an error. A daemon that answers `ready = false` is still restoring and keeps
+/// this deadline moving, so project count does not cap startup time.
+const STARTUP_SILENCE_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Parser)]
 #[command(name = "localweb", version, about = "Run local web projects")]
@@ -1028,8 +1030,16 @@ async fn start_daemon(paths: &Paths) -> Result<()> {
     Ok(())
 }
 
+/// Extends the startup silence budget after the daemon answers a status probe.
+///
+/// A daemon that is restoring answers `ready = false`; that still proves it is
+/// alive, so only a run of unanswered probes should reach the deadline.
+fn note_daemon_reply(deadline: &mut tokio::time::Instant) {
+    *deadline = tokio::time::Instant::now() + STARTUP_SILENCE_TIMEOUT;
+}
+
 async fn wait_for_daemon(paths: &Paths) -> Result<()> {
-    let deadline = tokio::time::Instant::now() + STARTUP_READY_TIMEOUT;
+    let mut deadline = tokio::time::Instant::now() + STARTUP_SILENCE_TIMEOUT;
     loop {
         let error = match tokio::time::timeout(
             Duration::from_secs(2),
@@ -1038,7 +1048,10 @@ async fn wait_for_daemon(paths: &Paths) -> Result<()> {
         .await
         {
             Ok(Ok(Response::Status(status))) if status.ready => return Ok(()),
-            Ok(Ok(Response::Status(_))) => "LocalWeb is still restoring projects".to_owned(),
+            Ok(Ok(Response::Status(_))) => {
+                note_daemon_reply(&mut deadline);
+                "LocalWeb is still restoring projects".to_owned()
+            }
             Ok(Ok(response)) => format!("unexpected daemon response: {response:?}"),
             Ok(Err(error)) => error.to_string(),
             Err(_) => copy::NO_RESPONSE.to_owned(),
@@ -2481,6 +2494,13 @@ mod tests {
         assert_eq!(human_size(1024), "1.0 KiB");
         assert_eq!(human_size(1536), "1.5 KiB");
         assert_eq!(human_size(1024 * 1024), "1.0 MiB");
+    }
+
+    #[test]
+    fn answered_status_extends_the_cli_startup_deadline() {
+        let mut deadline = tokio::time::Instant::now();
+        note_daemon_reply(&mut deadline);
+        assert!(deadline > tokio::time::Instant::now());
     }
 
     fn sample_project() -> (Project, PathBuf) {

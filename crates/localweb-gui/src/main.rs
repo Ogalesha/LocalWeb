@@ -61,6 +61,10 @@ const DAEMON_BACKGROUND_TIMEOUT: Duration = Duration::from_secs(5);
 /// databases can legitimately run for hours; the daemon enforces its own
 /// engine-level timeout.
 const DAEMON_DATABASE_TIMEOUT: Duration = Duration::from_hours(6);
+/// How long the daemon may stay silent while starting before the desktop gives
+/// up. A live daemon answering `ready = false` keeps making progress, so its
+/// restoration time is not capped by a fixed startup budget.
+const STARTUP_SILENCE_TIMEOUT: Duration = Duration::from_secs(30);
 
 fn main() -> eframe::Result {
     let placement = Paths::discover()
@@ -793,9 +797,10 @@ impl LocalWebApp {
                 };
                 if status.ready {
                     self.startup_deadline = None;
-                } else {
-                    self.startup_deadline
-                        .get_or_insert_with(|| Instant::now() + Duration::from_secs(60));
+                } else if self.daemon == DaemonState::Starting {
+                    // Every successful status reply, even one that reports
+                    // ongoing restoration, proves the daemon is alive.
+                    self.startup_deadline = Some(Instant::now() + STARTUP_SILENCE_TIMEOUT);
                     self.expire_startup();
                 }
                 let ready = status.ready;
@@ -1024,7 +1029,7 @@ impl LocalWebApp {
             state => state,
         };
         self.daemon = DaemonState::Starting;
-        self.startup_deadline = Some(Instant::now() + Duration::from_secs(60));
+        self.startup_deadline = Some(Instant::now() + STARTUP_SILENCE_TIMEOUT);
         match localweb_cli_path() {
             Ok(program) => self.run_command(Action::StartDaemon, program, vec!["start".into()]),
             Err(error) => {
@@ -4948,6 +4953,42 @@ mod tests {
         app.handle_command(Action::LoadShellIntegration, Ok("not json".into()));
         assert!(app.shell_integration.is_none());
         assert!(app.shell_integration_error.is_some());
+    }
+
+    #[test]
+    fn restoring_status_does_not_expire_while_daemon_answers() {
+        let mut app = LocalWebApp::state(None, Lang::English, None);
+        app.daemon = DaemonState::Starting;
+        app.startup_deadline = Some(Instant::now());
+        app.handle_response(
+            Action::RefreshStatus,
+            Ok(Response::Status(test_status(false))),
+        );
+        assert_eq!(app.daemon, DaemonState::Starting);
+        assert!(app.notice.is_none());
+        assert!(
+            app.startup_deadline
+                .is_some_and(|deadline| deadline > Instant::now())
+        );
+        app.handle_response(
+            Action::RefreshStatus,
+            Ok(Response::Status(test_status(true))),
+        );
+        assert_eq!(app.daemon, DaemonState::Running);
+        assert!(app.startup_deadline.is_none());
+    }
+
+    fn test_status(ready: bool) -> Status {
+        Status {
+            daemon_running: true,
+            ready,
+            gateway_running: false,
+            gateway_bind_address: None,
+            gateway_https_port: None,
+            project_count: 0,
+            active_projects: 0,
+            projects_needing_recovery: Vec::new(),
+        }
     }
 
     #[test]
