@@ -357,6 +357,34 @@ pub fn state_chip_with_note(
     });
 }
 
+/// State chip for a project whose previous stop or rollback still needs cleanup.
+pub fn recovery_chip(ui: &mut Ui, label: &str) -> Response {
+    egui::Frame::NONE
+        .fill(theme::WARNING_SOFT)
+        .corner_radius(theme::RADIUS_CONTROL)
+        .inner_margin(Margin::symmetric(10, 4))
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                status_mark(ui, theme::WARNING);
+                ui.label(medium(label).size(theme::SMALL_SIZE).color(theme::WARNING));
+            });
+        })
+        .response
+}
+
+/// Recovery chip plus a short note, used when the value is last known.
+pub fn recovery_chip_with_note(ui: &mut Ui, label: &str, note: &str) {
+    ui.vertical(|ui| {
+        ui.spacing_mut().item_spacing.y = 2.0;
+        recovery_chip(ui, label);
+        ui.label(
+            RichText::new(note)
+                .size(theme::SMALL_SIZE)
+                .color(theme::INK_MUTED),
+        );
+    });
+}
+
 /// Compact labelled state used for read-only presets.
 pub fn service_chip(ui: &mut Ui, title: &str, value: &str, color: Color32) {
     egui::Frame::NONE

@@ -840,6 +840,12 @@ async fn start_project_locked(
     if !project.enabled {
         return Err(LocalWebError::Config("project is disabled".into()));
     }
+    let recovery = state.running.lock().await.needs_recovery(name);
+    if recovery && mode != StartMode::Restore {
+        return Err(LocalWebError::Service(format!(
+            "{name} needs cleanup after a failed stop; stop it before starting it again"
+        )));
+    }
     let old = state.running.lock().await.snapshot();
     let proxy_ready = services::database_service_port(project.database).is_none()
         || state
@@ -858,7 +864,6 @@ async fn start_project_locked(
     let mut next = old.clone();
     next.insert(name.to_owned());
     let fresh = !old.contains(name);
-    let recovery = state.running.lock().await.needs_recovery(name);
     if fresh
         && !recovery
         && mode != StartMode::Restore
@@ -2877,6 +2882,33 @@ mod tests {
                 .iter()
                 .any(|check| check.check == "project recovery" && check.level == "WARNING")
         );
+        fs::remove_dir_all(base).unwrap();
+    }
+
+    #[tokio::test]
+    async fn recovery_projects_require_an_explicit_stop_before_start() {
+        let (base, paths, project) = project_fixture();
+        save_project(&paths, &project).unwrap();
+        let state = test_state(paths);
+        state
+            .running
+            .lock()
+            .await
+            .projects
+            .insert("demo".into(), ProjectRuntime::RecoveryNeeded);
+        let response = dispatch(
+            Request::ProjectStart {
+                name: "demo".into(),
+            },
+            &state,
+        )
+        .await;
+        let Response::Error { code, message } = response else {
+            panic!("recovery project started without cleanup");
+        };
+        assert_eq!(code, "ServiceStartFailed");
+        assert!(message.contains("needs cleanup"));
+        assert!(state.running.lock().await.needs_recovery("demo"));
         fs::remove_dir_all(base).unwrap();
     }
 

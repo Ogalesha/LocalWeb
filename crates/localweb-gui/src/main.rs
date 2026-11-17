@@ -36,8 +36,8 @@ use tray::{Tray, TrayCommand};
 use widgets::{
     CalloutKind, Pill, PillKind, callout, card_frame, check_row, empty_card, focus_ring,
     form_label, icon_button, icon_tile, medium, multi_line_field, page_header, rail_item,
-    raised_frame, section_heading, service_chip, single_line_field, state_chip,
-    state_chip_with_note, status_mark, strong, truncate_middle,
+    raised_frame, recovery_chip, recovery_chip_with_note, section_heading, service_chip,
+    single_line_field, state_chip, state_chip_with_note, status_mark, strong, truncate_middle,
 };
 
 #[global_allocator]
@@ -2075,6 +2075,12 @@ impl LocalWebApp {
                             ui.label(strong(&item.project.name).size(BODY_SIZE).color(INK));
                             if let Some(transition) = transition {
                                 transition_status(ui, lang, transition);
+                            } else if item.recovery_needed {
+                                recovery_chip_with_note(
+                                    ui,
+                                    lang.badge_recovery(),
+                                    lang.recovery_hint(),
+                                );
                             } else if self.daemon_online() {
                                 state_chip(
                                     ui,
@@ -2236,6 +2242,9 @@ impl LocalWebApp {
                                 .map(|(_, transition)| *transition);
                             if let Some(transition) = transition {
                                 transition_status(ui, lang, transition);
+                            } else if item.recovery_needed {
+                                recovery_chip(ui, lang.badge_recovery())
+                                    .on_hover_text(lang.recovery_hint());
                             } else if self.daemon_online() {
                                 state_chip(
                                     ui,
@@ -2382,6 +2391,11 @@ impl LocalWebApp {
         {
             return;
         }
+        if item.recovery_needed {
+            // Cleanup must finish before a start can claim the project again.
+            self.project_stop_action(ui, item, wide);
+            return;
+        }
         if item.running {
             self.project_stop_action(ui, item, wide);
             self.project_restart_action(ui, item, wide);
@@ -2409,19 +2423,25 @@ impl LocalWebApp {
 
     fn project_stop_action(&mut self, ui: &mut egui::Ui, item: &ProjectStatus, wide: bool) {
         let lang = self.lang;
+        let hint = if item.recovery_needed {
+            lang.recovery_hint()
+        } else {
+            lang.action_stop()
+        };
         let stop = if wide {
             Pill::new("", PillKind::Secondary)
-                .icon_only(Icon::Stop, lang.action_stop())
+                .icon_only(Icon::Stop, hint)
                 .height(36.0)
                 .enabled(self.requests.foreground_pending() == 0)
                 .show(ui)
-                .on_hover_text(lang.action_stop())
+                .on_hover_text(hint)
         } else {
             Pill::new(lang.action_stop(), PillKind::Secondary)
                 .icon(Icon::Stop)
                 .height(36.0)
                 .enabled(self.requests.foreground_pending() == 0)
                 .show(ui)
+                .on_hover_text(hint)
         };
         if stop.clicked() {
             self.project_transition =
@@ -5375,6 +5395,52 @@ mod tests {
     }
 
     #[test]
+    fn recovery_project_renders_only_the_cleanup_action() {
+        let path = test_source("recovery");
+        let form = AddProjectForm {
+            path: path.display().to_string(),
+            ..Default::default()
+        };
+        let project = localweb_core::Project::from_new(
+            form.to_request(Lang::English).unwrap(),
+            &GlobalConfig::default(),
+        )
+        .unwrap();
+        for view in [View::Dashboard, View::Projects] {
+            let mut app = LocalWebApp::state(None, Lang::English, None);
+            app.daemon = DaemonState::Running;
+            app.projects_loaded = true;
+            app.projects.push(ProjectStatus {
+                project: project.clone(),
+                running: false,
+                recovery_needed: true,
+                mail_web_url: None,
+                public_url: None,
+            });
+            let labels = render_labels(&mut app, view, 560.0);
+            assert!(
+                labels
+                    .iter()
+                    .any(|label| label == Lang::English.badge_recovery()),
+                "{view:?} must show the recovery chip; rendered: {labels:?}"
+            );
+            assert!(
+                labels
+                    .iter()
+                    .any(|label| label == Lang::English.action_stop()),
+                "{view:?} must offer the cleanup stop action; rendered: {labels:?}"
+            );
+            assert!(
+                !labels
+                    .iter()
+                    .any(|label| label == Lang::English.action_start()),
+                "{view:?} must not offer start while cleanup is pending; rendered: {labels:?}"
+            );
+        }
+        fs::remove_dir_all(path).unwrap();
+    }
+
+    #[test]
     fn reading_domain_suffix_does_not_perform_setup() {
         let base = test_source("first-run");
         let paths = Paths {
@@ -5418,6 +5484,18 @@ mod tests {
             },
         );
         (screen, output)
+    }
+
+    fn render_labels(app: &mut LocalWebApp, view: View, height: f32) -> Vec<String> {
+        let (_, output) = render_minimum_view(app, view, height);
+        output
+            .shapes
+            .iter()
+            .filter_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) => Some(text.galley.job.text.clone()),
+                _ => None,
+            })
+            .collect()
     }
 
     fn assert_view_fits(app: &mut LocalWebApp, view: View, height: f32, required: &[&str]) {

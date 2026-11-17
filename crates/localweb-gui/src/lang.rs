@@ -981,6 +981,70 @@ impl Lang {
         }
     }
 
+    pub fn badge_recovery(self) -> &'static str {
+        match self {
+            Self::English => "Needs cleanup",
+            Self::Italiano => "Da pulire",
+            Self::Shqip => "Kërkon pastrim",
+            Self::Spanish => "Requiere limpieza",
+            Self::French => "Nettoyage requis",
+            Self::Portuguese => "Precisa de limpeza",
+            Self::Russian => "Нужна очистка",
+            Self::Polish => "Wymaga czyszczenia",
+            Self::Ukrainian => "Потрібне очищення",
+            Self::Turkish => "Temizlik gerekli",
+            Self::Greek => "Χρειάζεται καθαρισμός",
+            Self::Hindi => "सफ़ाई आवश्यक",
+            Self::Chinese => "需要清理",
+            Self::Swedish => "Behöver rensas",
+        }
+    }
+
+    pub fn recovery_hint(self) -> &'static str {
+        match self {
+            Self::English => {
+                "The previous stop left services behind. Stop the project to clean them up, then start it again."
+            }
+            Self::Italiano => {
+                "L'arresto precedente ha lasciato servizi attivi. Ferma il progetto per pulirli, poi avvialo di nuovo."
+            }
+            Self::Shqip => {
+                "Ndalimi i mëparshëm la shërbime aktive. Ndalo projektin për t'i pastruar, pastaj nise përsëri."
+            }
+            Self::Spanish => {
+                "La detención anterior dejó servicios activos. Detén el proyecto para limpiarlos y vuelve a iniciarlo."
+            }
+            Self::French => {
+                "L'arrêt précédent a laissé des services actifs. Arrêtez le projet pour les nettoyer, puis redémarrez-le."
+            }
+            Self::Portuguese => {
+                "A paragem anterior deixou serviços ativos. Pare o projeto para os limpar e volte a iniciá-lo."
+            }
+            Self::Russian => {
+                "Предыдущая остановка оставила службы запущенными. Остановите проект, чтобы очистить их, затем запустите снова."
+            }
+            Self::Polish => {
+                "Poprzednie zatrzymanie pozostawiło uruchomione usługi. Zatrzymaj projekt, aby je wyczyścić, a następnie uruchom go ponownie."
+            }
+            Self::Ukrainian => {
+                "Попереднє зупинення залишило служби запущеними. Зупиніть проєкт, щоб очистити їх, потім запустіть знову."
+            }
+            Self::Turkish => {
+                "Önceki durdurma servisleri açık bıraktı. Temizlemek için projeyi durdurun, sonra yeniden başlatın."
+            }
+            Self::Greek => {
+                "Η προηγούμενη διακοπή άφησε υπηρεσίες ενεργές. Σταματήστε το έργο για καθαρισμό και μετά ξεκινήστε το ξανά."
+            }
+            Self::Hindi => {
+                "पिछले रोकने से सेवाएँ चालू रह गईं। उन्हें साफ़ करने के लिए प्रोजेक्ट रोकें, फिर दोबारा शुरू करें।"
+            }
+            Self::Chinese => "上次停止后仍有服务在运行。请先停止项目进行清理，然后重新启动。",
+            Self::Swedish => {
+                "Föregående stopp lämnade tjänster aktiva. Stoppa projektet för att rensa dem och starta det sedan igen."
+            }
+        }
+    }
+
     pub fn action_stop(self) -> &'static str {
         match self {
             Self::English => "Stop",
