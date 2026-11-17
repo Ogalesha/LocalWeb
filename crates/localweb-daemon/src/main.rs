@@ -242,6 +242,29 @@ impl State {
             )),
         }
     }
+
+    /// Acquires the mutation lock for execution resolution when one is needed.
+    ///
+    /// Resolution can run during restoration because project definitions are
+    /// already final and no mutation may be admitted before the serving phase.
+    /// The shims it installs are per-project and idempotent, so waiting for a
+    /// long restore would only break `php`, `node` and `composer` invocations
+    /// made while the daemon reports progress. While serving, resolution still
+    /// serializes with mutations; a stopped daemon rejects it.
+    async fn begin_resolution(
+        &self,
+    ) -> localweb_core::Result<Option<tokio::sync::MutexGuard<'_, ()>>> {
+        if self.phase() == DaemonPhase::Restoring {
+            return Ok(None);
+        }
+        let guard = self.operations.lock().await;
+        match self.phase() {
+            DaemonPhase::Restoring | DaemonPhase::Serving => Ok(Some(guard)),
+            DaemonPhase::Stopping | DaemonPhase::Stopped => Err(LocalWebError::Service(
+                "LocalWeb is stopping; start it again before resolving runtimes".into(),
+            )),
+        }
+    }
 }
 
 const fn daemon_phase(code: u8) -> DaemonPhase {
@@ -761,12 +784,12 @@ async fn execute(request: Request, state: &Arc<State>) -> localweb_core::Result<
         | Request::DatabaseImport { .. }) => database::execute(request, state).await,
         Request::RuntimeList => Ok(Response::Diagnostics(runtime_diagnostics())),
         Request::ResolveExecution { name } => {
-            let _operations = state.begin_operation().await?;
+            let _operations = state.begin_resolution().await?;
             let project = find_project(&state.paths, &name)?;
             execution_spec(state, &project)
         }
         Request::ResolveExecutionAt { path } => {
-            let _operations = state.begin_operation().await?;
+            let _operations = state.begin_resolution().await?;
             let projects = load_projects(&state.paths)?;
             let project = localweb_core::project_containing(&projects, &path).ok_or_else(|| {
                 LocalWebError::ProjectNotFound(format!(
@@ -3052,6 +3075,86 @@ mod tests {
         assert!(state.cron_jobs.lock().await.is_empty());
         state.set_phase(DaemonPhase::Stopped);
         state.begin_operation().await.unwrap_err();
+        fs::remove_dir_all(base).unwrap();
+    }
+
+    #[cfg(unix)]
+    fn install_fake_php_runtime(paths: &Paths, version: &str) {
+        use std::os::unix::fs::PermissionsExt as _;
+        let root = paths.data.join("runtimes/php").join(version);
+        fs::create_dir_all(root.join("bin")).unwrap();
+        fs::create_dir_all(root.join("sbin")).unwrap();
+        fs::write(
+            root.join("bin/php"),
+            format!("#!/bin/sh\nprintf '{version}'"),
+        )
+        .unwrap();
+        fs::write(
+            root.join("sbin/php-fpm"),
+            format!("#!/bin/sh\nprintf 'PHP {version}.0 (fpm-fcgi)\\n'"),
+        )
+        .unwrap();
+        for path in [root.join("bin/php"), root.join("sbin/php-fpm")] {
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn resolution_runs_during_restoration_while_mutations_wait() {
+        let (base, paths, mut project) = project_fixture();
+        project.php = "8.2".into();
+        save_project(&paths, &project).unwrap();
+        install_fake_php_runtime(&paths, &project.php);
+        let state = test_state(paths);
+        state.set_phase(DaemonPhase::Restoring);
+        let guard = state.operations.lock().await;
+        assert!(
+            state.begin_resolution().await.unwrap().is_none(),
+            "restoring resolution must not wait for the mutation lock"
+        );
+
+        for request in [
+            Request::ResolveExecution {
+                name: project.name.clone(),
+            },
+            Request::ResolveExecutionAt {
+                path: project.path.join("nested"),
+            },
+        ] {
+            let response = tokio::time::timeout(Duration::from_secs(2), execute(request, &state))
+                .await
+                .expect("resolution must not wait for restoration")
+                .unwrap();
+            let Response::Execution(spec) = response else {
+                panic!("expected an execution spec");
+            };
+            assert_eq!(spec.project_name, project.name);
+            assert_eq!(spec.project_path, project.path);
+        }
+
+        let input = serde_json::from_value(serde_json::json!({
+            "path": base.join("added"), "name": "added",
+            "hostname": "added.test", "autostart": false
+        }))
+        .unwrap();
+        tokio::time::timeout(
+            Duration::from_millis(10),
+            execute(Request::ProjectAdd(input), &state),
+        )
+        .await
+        .expect_err("mutations must wait for restoration");
+
+        drop(guard);
+        state.set_phase(DaemonPhase::Stopped);
+        let rejected = dispatch(
+            Request::ResolveExecution {
+                name: project.name.clone(),
+            },
+            &state,
+        )
+        .await;
+        assert!(matches!(rejected, Response::Error { .. }));
         fs::remove_dir_all(base).unwrap();
     }
 
