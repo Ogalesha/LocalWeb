@@ -455,7 +455,6 @@ struct LocalWebApp {
     database_for: Option<String>,
     database_snapshots: Vec<DatabaseSnapshot>,
     database_loaded: bool,
-    database_loading: bool,
     database_error: Option<String>,
     database_name: String,
     database_safety: bool,
@@ -530,7 +529,6 @@ impl LocalWebApp {
             database_for: None,
             database_snapshots: Vec::new(),
             database_loaded: false,
-            database_loading: false,
             database_error: None,
             database_name: String::new(),
             database_safety: true,
@@ -734,22 +732,20 @@ impl LocalWebApp {
                         self.environment_error = Some(error);
                     }
                     Action::LoadSnapshots(name) => {
-                        self.database_loading = false;
-                        self.database_loaded = true;
                         if self.database_for.as_deref() == Some(&name) {
+                            self.database_loaded = true;
                             self.database_error = Some(error);
-                        } else {
-                            self.notice = Some(Notice::error(error));
                         }
                     }
-                    Action::DatabaseCreate(_)
+                    action @ (Action::DatabaseCreate(_)
                     | Action::DatabaseRestore(_)
                     | Action::DatabaseDelete(_)
                     | Action::DatabaseCleanup(_)
                     | Action::DatabaseExport(_)
-                    | Action::DatabaseImport(_) => {
-                        self.database_loading = false;
-                        self.database_error = Some(error.clone());
+                    | Action::DatabaseImport(_)) => {
+                        if action.database_project() == self.database_for.as_deref() {
+                            self.database_error = Some(error.clone());
+                        }
                         self.notice = Some(Notice::error(error));
                     }
                     Action::UpdateProject(_) if self.view == View::EditProject => {
@@ -783,22 +779,20 @@ impl LocalWebApp {
                     self.environment_error = Some(error);
                 }
                 Action::LoadSnapshots(name) => {
-                    self.database_loading = false;
-                    self.database_loaded = true;
                     if self.database_for.as_deref() == Some(&name) {
+                        self.database_loaded = true;
                         self.database_error = Some(error);
-                    } else {
-                        self.notice = Some(Notice::error(error));
                     }
                 }
-                Action::DatabaseCreate(_)
+                action @ (Action::DatabaseCreate(_)
                 | Action::DatabaseRestore(_)
                 | Action::DatabaseDelete(_)
                 | Action::DatabaseCleanup(_)
                 | Action::DatabaseExport(_)
-                | Action::DatabaseImport(_) => {
-                    self.database_loading = false;
-                    self.database_error = Some(error.clone());
+                | Action::DatabaseImport(_)) => {
+                    if action.database_project() == self.database_for.as_deref() {
+                        self.database_error = Some(error.clone());
+                    }
                     self.notice = Some(Notice::error(error));
                 }
                 Action::UpdateProject(_) if self.view == View::EditProject => {
@@ -849,26 +843,25 @@ impl LocalWebApp {
                 }
             }
             (Action::LoadSnapshots(name), Response::Snapshots(snapshots)) => {
-                self.database_loading = false;
-                self.database_loaded = true;
                 if self.database_for.as_deref() == Some(&name) {
+                    self.database_loaded = true;
                     self.database_snapshots = snapshots;
                     self.database_error = None;
                 }
             }
             (action, Response::DatabaseOperation(result)) => {
                 if let Some(name) = action.database_project().map(str::to_owned) {
-                    if matches!(action, Action::DatabaseCreate(_)) {
-                        self.database_name.clear();
-                    }
-                    self.database_dialog = None;
-                    self.database_dialog_error = None;
-                    self.database_confirm = None;
-                    self.database_error = None;
-                    self.notice = Some(Notice::success(database_result_message(&result)));
                     if self.database_for.as_deref() == Some(&name) {
+                        if matches!(action, Action::DatabaseCreate(_)) {
+                            self.database_name.clear();
+                        }
+                        self.database_dialog = None;
+                        self.database_dialog_error = None;
+                        self.database_confirm = None;
+                        self.database_error = None;
                         self.load_snapshots(&name);
                     }
+                    self.notice = Some(Notice::success(database_result_message(&result)));
                 } else {
                     self.notice = Some(Notice::error(
                         self.lang.notice_unexpected(&format!("{result:?}")),
@@ -2604,19 +2597,34 @@ impl LocalWebApp {
         );
         ui.add_space(8.0);
         if self.environment.is_none() && self.environment_error.is_none() {
-            if Pill::new(lang.reveal_environment(), PillKind::Secondary)
-                .height(36.0)
-                .enabled(self.daemon_online() && self.requests.foreground_pending() == 0)
-                .show(ui)
-                .clicked()
-            {
-                self.request(
-                    Action::LoadEnvironment(project.name.clone()),
-                    Request::ProjectEnvironment {
-                        name: project.name.clone(),
-                    },
-                );
-            }
+            let loading = self
+                .requests
+                .pending(&requests::Query::Environment(project.name.clone()));
+            ui.horizontal(|ui| {
+                if Pill::new(lang.reveal_environment(), PillKind::Secondary)
+                    .height(36.0)
+                    .enabled(
+                        self.daemon_online() && self.requests.foreground_pending() == 0 && !loading,
+                    )
+                    .show(ui)
+                    .clicked()
+                {
+                    self.request(
+                        Action::LoadEnvironment(project.name.clone()),
+                        Request::ProjectEnvironment {
+                            name: project.name.clone(),
+                        },
+                    );
+                }
+                if loading {
+                    ui.spinner();
+                    ui.label(
+                        RichText::new(lang.operation_busy())
+                            .size(SMALL_SIZE)
+                            .color(INK_MUTED),
+                    );
+                }
+            });
         } else if let Some(values) = &self.environment {
             ui.label(
                 RichText::new(lang.environment_help())
@@ -2672,24 +2680,20 @@ impl LocalWebApp {
         ui.add_space(6.0);
     }
 
+    /// Resets per-project panel state; the section below issues the one load.
     fn prepare_database_panel(&mut self, project: &Project) {
         self.database_for = Some(project.name.clone());
         self.database_snapshots.clear();
         self.database_loaded = false;
-        self.database_loading = false;
         self.database_error = None;
         self.database_name.clear();
         self.database_safety = true;
         self.database_dialog = None;
         self.database_dialog_error = None;
         self.database_confirm = None;
-        if project.database != Database::None && self.daemon_online() {
-            self.load_snapshots(&project.name);
-        }
     }
 
     fn load_snapshots(&mut self, name: &str) {
-        self.database_loading = true;
         self.database_error = None;
         self.request(
             Action::LoadSnapshots(name.to_owned()),
@@ -2736,9 +2740,16 @@ impl LocalWebApp {
         if self.database_for.as_deref() != Some(&project.name) {
             self.prepare_database_panel(project);
         }
+        // Derive loading from the owned request instead of mirroring it in a
+        // second flag: a reply dropped by a newer mutation must re-arm the
+        // automatic load instead of leaving a permanent spinner.
+        let loading = self
+            .requests
+            .pending(&requests::Query::Snapshots(project.name.clone()));
         if self.daemon_online()
+            && self.requests.foreground_pending() == 0
             && !self.database_loaded
-            && !self.database_loading
+            && !loading
             && self.database_error.is_none()
         {
             self.load_snapshots(&project.name);
@@ -2775,7 +2786,7 @@ impl LocalWebApp {
             if Pill::new(lang.database_refresh(), PillKind::Ghost)
                 .icon(Icon::Refresh)
                 .height(32.0)
-                .enabled(enabled && !self.database_loading)
+                .enabled(enabled && !loading)
                 .show(ui)
                 .clicked()
             {
@@ -2821,10 +2832,10 @@ impl LocalWebApp {
                     project: project.name.clone(),
                 });
             }
-            if self.database_loading || self.requests.foreground_pending() > 0 {
+            if loading || self.requests.foreground_pending() > 0 {
                 ui.spinner();
                 ui.label(
-                    RichText::new(if self.database_loading {
+                    RichText::new(if loading {
                         lang.database_loading()
                     } else {
                         lang.database_busy()
@@ -5528,6 +5539,46 @@ mod tests {
             );
         }
         fs::remove_dir_all(path).unwrap();
+    }
+
+    #[test]
+    fn stale_snapshot_reply_does_not_touch_the_current_project() {
+        let mut app = LocalWebApp::state(None, Lang::English, None);
+        app.database_for = Some("b".into());
+        app.database_loaded = false;
+        app.handle_response(
+            Action::LoadSnapshots("a".into()),
+            Ok(Response::Snapshots(Vec::new())),
+        );
+        assert!(!app.database_loaded, "project A must not load project B");
+        app.handle_response(
+            Action::LoadSnapshots("a".into()),
+            Ok(Response::Error {
+                code: "IoError".into(),
+                message: "failed".into(),
+            }),
+        );
+        assert!(app.database_error.is_none(), "project A's error is not B's");
+        app.handle_response(
+            Action::LoadSnapshots("b".into()),
+            Ok(Response::Snapshots(Vec::new())),
+        );
+        assert!(app.database_loaded);
+        assert!(app.database_error.is_none());
+    }
+
+    #[test]
+    fn stale_database_operation_keeps_the_current_panel_state() {
+        let mut app = LocalWebApp::state(None, Lang::English, None);
+        app.database_for = Some("b".into());
+        app.database_error = Some("project B error".into());
+        app.handle_response(
+            Action::DatabaseCreate("a".into()),
+            Ok(Response::DatabaseOperation(Box::new(
+                DatabaseOperationResult::message("created"),
+            ))),
+        );
+        assert_eq!(app.database_error.as_deref(), Some("project B error"));
     }
 
     #[test]

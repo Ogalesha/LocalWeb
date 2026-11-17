@@ -82,6 +82,17 @@ impl Requests {
             .count()
     }
 
+    /// Whether a query still owns a pending ticket.
+    ///
+    /// A superseded snapshot remains pending until its ticket completes, even
+    /// though its reply will be discarded. Panels use this to avoid issuing a
+    /// duplicate request while one is still in flight.
+    pub(super) fn pending(&self, query: &Query) -> bool {
+        self.pending
+            .values()
+            .any(|request| request.query.as_ref() == Some(query))
+    }
+
     pub(super) fn background_pending(&self) -> usize {
         self.pending.len() - self.foreground_pending()
     }
@@ -104,6 +115,25 @@ mod tests {
         assert!(requests.complete(current));
         assert_eq!(requests.foreground_pending(), 0);
         assert_eq!(requests.background_pending(), 0);
+    }
+
+    #[test]
+    fn invalidated_snapshot_load_reissues_once_dropped_result_is_owned() {
+        let mut requests = Requests::default();
+        let query = Query::Snapshots("demo".into());
+        let load = requests.begin(Some(query.clone()));
+        assert!(requests.pending(&query));
+        let mutation = requests.begin(None);
+        assert!(requests.complete(mutation));
+        assert!(!requests.complete(load), "the stale reply is discarded");
+        assert!(
+            !requests.pending(&query),
+            "the panel may retry exactly once"
+        );
+        let retry = requests.begin(Some(query.clone()));
+        assert!(requests.pending(&query));
+        assert!(requests.complete(retry));
+        assert!(!requests.pending(&query));
     }
 
     #[test]
