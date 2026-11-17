@@ -106,6 +106,10 @@ localweb ca install
 localweb start
 ```
 
+Running `localweb start` again leaves a healthy daemon and its projects
+untouched. Use `localweb start --restart` after an upgrade when you
+explicitly want to replace the running process.
+
 Setup creates the user configuration, database, certificate and log
 directories, generates the development CA, registers the paths with the
 privileged helper and installs the user service units. It also installs the

@@ -50,7 +50,11 @@ enum CommandKind {
         no_shell_integration: bool,
     },
     #[command(about = "Start LocalWeb")]
-    Start,
+    Start {
+        /// Restart even when the daemon is already serving.
+        #[arg(long)]
+        restart: bool,
+    },
     #[command(about = "Stop LocalWeb and running projects")]
     Shutdown,
     #[command(about = "Show LocalWeb status")]
@@ -717,8 +721,8 @@ async fn main() -> Result<()> {
             env_format = Some(format);
             Request::ProjectEnvironment { name }
         }
-        CommandKind::Start => {
-            start_daemon(&paths).await?;
+        CommandKind::Start { restart } => {
+            start_daemon(&paths, restart).await?;
             return Ok(());
         }
         CommandKind::Autostart { command } => {
@@ -1022,10 +1026,58 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-async fn start_daemon(paths: &Paths) -> Result<()> {
-    // Restart so a stale daemon left behind by a package upgrade is replaced.
-    localweb_core::service::restart_daemon()?;
-    wait_for_daemon(paths).await?;
+/// What a `localweb start` probe observed before changing service state.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum DaemonProbe {
+    /// The daemon answered and finished restoration.
+    Ready,
+    /// The daemon answered but is still restoring projects.
+    Restoring,
+    /// No daemon answered the status probe.
+    Unreachable,
+}
+
+/// The least destructive action that satisfies `localweb start`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum StartAction {
+    /// Leave the serving daemon and its projects untouched.
+    AlreadyRunning,
+    /// Wait for the reachable daemon to finish restoring.
+    WaitForReady,
+    /// Ask the service manager to replace or start the daemon.
+    StartService,
+}
+
+fn start_action(probe: DaemonProbe, restart: bool) -> StartAction {
+    match (restart, probe) {
+        (true, _) | (false, DaemonProbe::Unreachable) => StartAction::StartService,
+        (false, DaemonProbe::Ready) => StartAction::AlreadyRunning,
+        (false, DaemonProbe::Restoring) => StartAction::WaitForReady,
+    }
+}
+
+async fn probe_daemon(paths: &Paths) -> DaemonProbe {
+    match tokio::time::timeout(Duration::from_secs(2), send_request(paths, Request::Status)).await {
+        Ok(Ok(Response::Status(status))) if status.ready => DaemonProbe::Ready,
+        Ok(Ok(Response::Status(_))) => DaemonProbe::Restoring,
+        _ => DaemonProbe::Unreachable,
+    }
+}
+
+async fn start_daemon(paths: &Paths, restart: bool) -> Result<()> {
+    match start_action(probe_daemon(paths).await, restart) {
+        StartAction::AlreadyRunning => {
+            println!("{}", copy::LOCALWEB_ALREADY_RUNNING);
+            return Ok(());
+        }
+        StartAction::WaitForReady => wait_for_daemon(paths).await?,
+        StartAction::StartService => {
+            // Restart so a stale daemon left behind by a package upgrade is
+            // replaced when the caller asked for it or none is reachable.
+            localweb_core::service::restart_daemon()?;
+            wait_for_daemon(paths).await?;
+        }
+    }
     println!("{}", copy::LOCALWEB_STARTED);
     Ok(())
 }
@@ -2501,6 +2553,36 @@ mod tests {
         let mut deadline = tokio::time::Instant::now();
         note_daemon_reply(&mut deadline);
         assert!(deadline > tokio::time::Instant::now());
+    }
+
+    #[test]
+    fn start_is_idempotent_when_the_daemon_is_ready() {
+        assert_eq!(
+            start_action(DaemonProbe::Ready, false),
+            StartAction::AlreadyRunning
+        );
+        assert_eq!(
+            start_action(DaemonProbe::Restoring, false),
+            StartAction::WaitForReady
+        );
+        assert_eq!(
+            start_action(DaemonProbe::Unreachable, false),
+            StartAction::StartService
+        );
+        assert_eq!(
+            start_action(DaemonProbe::Ready, true),
+            StartAction::StartService
+        );
+        assert!(matches!(
+            Cli::try_parse_from(["localweb", "start"]).unwrap().command,
+            CommandKind::Start { restart: false }
+        ));
+        assert!(matches!(
+            Cli::try_parse_from(["localweb", "start", "--restart"])
+                .unwrap()
+                .command,
+            CommandKind::Start { restart: true }
+        ));
     }
 
     fn sample_project() -> (Project, PathBuf) {

@@ -6,6 +6,8 @@ pub const RUNNING: &str = "Running";
 pub const STOPPED: &str = "Stopped";
 /// Successful application startup.
 pub const LOCALWEB_STARTED: &str = "LocalWeb started";
+/// `localweb start` found an already serving daemon and left it alone.
+pub const LOCALWEB_ALREADY_RUNNING: &str = "LocalWeb is already running";
 /// Successful application shutdown.
 pub const LOCALWEB_STOPPED: &str = "LocalWeb stopped";
 /// Successful trust installation for the development certificate.
