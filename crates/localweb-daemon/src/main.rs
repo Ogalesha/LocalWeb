@@ -1780,8 +1780,24 @@ fn apply_services(state: &State, active: &BTreeSet<String>) -> localweb_core::Re
     } else {
         Services::stop("localweb-apache")?;
     }
-    let routes_changed = write_routes(state, active)?;
-    start_gateway(state, routes_changed)
+    let force_gateway = state.routes_dirty.load(Ordering::Acquire);
+    let routes_changed = match write_routes(state, active) {
+        Ok(changed) => changed,
+        Err(error) => {
+            state.routes_dirty.store(true, Ordering::Release);
+            return Err(error);
+        }
+    };
+    match start_gateway(state, routes_changed || force_gateway) {
+        Ok(()) => {
+            state.routes_dirty.store(false, Ordering::Release);
+            Ok(())
+        }
+        Err(error) => {
+            state.routes_dirty.store(true, Ordering::Release);
+            Err(error)
+        }
+    }
 }
 
 /// Rewrites derived routes after a committed project mutation.
@@ -1791,11 +1807,14 @@ fn apply_services(state: &State, active: &BTreeSet<String>) -> localweb_core::Re
 /// file and any active gateway are current.
 async fn sync_gateway_routes(state: &Arc<State>) -> bool {
     let active = state.running.lock().await.snapshot();
+    let force_gateway = state.routes_dirty.load(Ordering::Acquire);
     let task_state = Arc::clone(state);
-    let result = tokio::task::spawn_blocking(move || refresh_gateway_routes(&task_state, &active))
-        .await
-        .map_err(|error| join_failed(&error))
-        .and_then(std::convert::identity);
+    let result = tokio::task::spawn_blocking(move || {
+        refresh_gateway_routes(&task_state, &active, force_gateway)
+    })
+    .await
+    .map_err(|error| join_failed(&error))
+    .and_then(std::convert::identity);
     match result {
         Ok(()) => {
             state.routes_dirty.store(false, Ordering::Release);
@@ -1813,10 +1832,14 @@ async fn sync_gateway_routes(state: &Arc<State>) -> bool {
 ///
 /// The gateway reads its route table only at startup, so removing a stopped
 /// project still requires a restart when the gateway is already running.
-fn refresh_gateway_routes(state: &State, active: &BTreeSet<String>) -> localweb_core::Result<()> {
+fn refresh_gateway_routes(
+    state: &State,
+    active: &BTreeSet<String>,
+    force_gateway: bool,
+) -> localweb_core::Result<()> {
     let routes_changed = write_routes(state, active)?;
     if is_active("localweb-gateway") {
-        start_gateway(state, routes_changed)?;
+        start_gateway(state, routes_changed || force_gateway)?;
     }
     Ok(())
 }
@@ -2864,6 +2887,27 @@ mod tests {
         assert!(state.routes_dirty.load(Ordering::Acquire));
         fs::remove_dir(&routes).unwrap();
         sync_gateway_routes(&state).await;
+        assert!(!state.routes_dirty.load(Ordering::Acquire));
+        assert!(gateway_routes(&state.paths).is_empty());
+        fs::remove_dir_all(base).unwrap();
+    }
+
+    #[tokio::test]
+    async fn apply_services_marks_stale_routes_for_maintenance_retry() {
+        let (base, paths, _) = project_fixture();
+        let state = test_state(paths);
+        let routes = state.paths.runtime.join("gateway-routes.json");
+        fs::create_dir(&routes).unwrap();
+        let task_state = Arc::clone(&state);
+        let result =
+            tokio::task::spawn_blocking(move || apply_services(&task_state, &BTreeSet::new()))
+                .await
+                .unwrap();
+        result.expect_err("route write failure was hidden");
+        assert!(state.routes_dirty.load(Ordering::Acquire));
+
+        fs::remove_dir(&routes).unwrap();
+        assert!(sync_gateway_routes(&state).await);
         assert!(!state.routes_dirty.load(Ordering::Acquire));
         assert!(gateway_routes(&state.paths).is_empty());
         fs::remove_dir_all(base).unwrap();
