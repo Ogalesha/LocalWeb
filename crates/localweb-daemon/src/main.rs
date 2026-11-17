@@ -739,6 +739,7 @@ async fn execute(request: Request, state: &Arc<State>) -> localweb_core::Result<
             // configuration that no longer exists.
             stop_project_locked(state, &name).await?;
             fs::remove_file(state.paths.project_file(project.id))?;
+            state.database_locks.lock().await.remove(&name);
             state
                 .cron_last_minute
                 .lock()
@@ -2872,6 +2873,7 @@ mod tests {
         let (base, paths, project) = project_fixture();
         save_project(&paths, &project).unwrap();
         let state = test_state(paths);
+        let _lock = database::lock_project(&state, "demo").await;
         let routes = state.paths.runtime.join("gateway-routes.json");
         fs::create_dir(&routes).unwrap();
         let response = execute(
@@ -2884,11 +2886,40 @@ mod tests {
         .unwrap();
         assert!(matches!(response, Response::Message(_)));
         find_project(&state.paths, "demo").unwrap_err();
+        assert!(state.database_locks.lock().await.is_empty());
         assert!(state.routes_dirty.load(Ordering::Acquire));
         fs::remove_dir(&routes).unwrap();
         sync_gateway_routes(&state).await;
         assert!(!state.routes_dirty.load(Ordering::Acquire));
         assert!(gateway_routes(&state.paths).is_empty());
+        fs::remove_dir_all(base).unwrap();
+    }
+
+    #[tokio::test]
+    async fn queued_database_operation_sees_a_removed_project() {
+        let (base, paths, mut project) = project_fixture();
+        project.database = localweb_core::Database::Sqlite;
+        save_project(&paths, &project).unwrap();
+        let state = test_state(paths);
+        let lock = database::lock_project(&state, &project.name).await;
+        let guard = lock.lock().await;
+        let task_state = Arc::clone(&state);
+        let name = project.name.clone();
+        let queued = tokio::spawn(async move {
+            database::execute(Request::DatabaseSnapshotList { project: name }, &task_state).await
+        });
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        fs::remove_file(state.paths.project_file(project.id)).unwrap();
+        state.database_locks.lock().await.remove(&project.name);
+        drop(guard);
+        let error = queued
+            .await
+            .unwrap()
+            .expect_err("queued operation ran after project removal");
+        assert!(
+            matches!(error, LocalWebError::ProjectNotFound(_)),
+            "{error:?}"
+        );
         fs::remove_dir_all(base).unwrap();
     }
 

@@ -163,6 +163,18 @@ where
     F: FnOnce(&Paths, &Project) -> Result<T> + Send + 'static,
 {
     let paths = state.paths.clone();
+    let queued = find_project(&paths, name)?;
+    if queued.database == Database::None {
+        return Err(LocalWebError::Config(format!(
+            "{} has no database; database management is unavailable",
+            queued.name
+        )));
+    }
+    let lock = lock_project(state, name).await;
+    let _guard = lock.lock().await;
+    // A removal or an earlier database task may have changed the project
+    // while this request waited. Re-read its definition under the project lock
+    // so queued work cannot run against a deleted project.
     let project = find_project(&paths, name)?;
     if project.database == Database::None {
         return Err(LocalWebError::Config(format!(
@@ -170,8 +182,6 @@ where
             project.name
         )));
     }
-    let lock = lock_project(state, name).await;
-    let _guard = lock.lock().await;
     // Database work reads and writes the same shared engines that project
     // start/stop and shutdown manage. Take the daemon phase lock after the
     // project lock, matching ProjectUpdate/ProjectRemove, so a long import or
