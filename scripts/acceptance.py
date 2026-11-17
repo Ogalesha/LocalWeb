@@ -170,6 +170,11 @@ try:
     # publish every domain up front: a start is refused until its domain maps
     # to the gateway address.
     domains.extend(["fault-one.test", "fault-two.test"])
+    domains.extend(
+        f"db-{label}-{engine}.test"
+        for engine in ("mariadb", "mysql", "postgres", "sqlite")
+        for label in ("a", "b")
+    )
     helper("sync-hosts", json.dumps({"address": gateway_address, "domains": domains}).encode())
     if not mac:
         # The helper lock is global, even when callers use different profiles.
