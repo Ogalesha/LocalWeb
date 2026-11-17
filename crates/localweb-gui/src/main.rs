@@ -4913,7 +4913,7 @@ mod tests {
         app.handle_command(Action::LoadShellIntegration, Ok(json.into()));
         let stored = app.shell_integration.as_ref().expect("status is stored");
         assert!(stored.ready());
-        assert!(stored.missing_tools.is_empty());
+        assert_eq!(stored.missing_tools, Vec::<String>::new());
         assert_eq!(
             stored.shell_file.as_deref(),
             Some(Path::new("/home/dev/.zshrc"))
