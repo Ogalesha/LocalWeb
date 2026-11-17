@@ -2,18 +2,47 @@
   <img src="assets/brand/localweb-logo.png" alt="LocalWeb" width="420">
 </p>
 
-# Local Web
+# LocalWeb
 
-A native local development environment for web developers. Choose a source
-folder, a PHP version, a web server and the services your app needs. Run
-projects side by side on fixed local HTTP ports, with optional HTTPS
-domains, without Docker or virtual machines.
+LocalWeb is a **native local development environment for PHP applications**.
+It runs directly on your computer and starts the services a project needs:
+PHP-FPM, nginx or Apache, MariaDB, MySQL, PostgreSQL or SQLite, Redis,
+Mailpit, background workers and scheduled tasks. Each project gets fixed
+local ports and its own HTTPS address, such as `https://my-project.test`.
 
-Use WordPress, Laravel, Symfony, Drupal, another PHP framework or CMS, or
-your own application. Presets are shortcuts, not a list of supported apps.
-The **Generic PHP** preset lets you choose the document root, database,
-cache, worker command and scheduled tasks yourself. Your application's
-requirements still determine which PHP and database versions it can use.
+LocalWeb does not use Docker or a virtual machine. Your application stays in
+the folder where you already develop it; LocalWeb does not copy, scaffold or
+rewrite it. Configuration, databases, certificates, logs and snapshots live
+in your user data directory instead.
+
+It is meant for WordPress, Laravel, Symfony, Drupal, another PHP framework or
+CMS, or a custom PHP application. Presets are shortcuts, not a list of
+supported applications. **Generic PHP** lets you choose the document root,
+database, cache, worker command and scheduled tasks yourself. Your
+application's requirements still decide which PHP and database versions it
+can use.
+
+### The words used in this README
+
+- **Project** — one registered source folder plus the PHP version, web
+  server and services LocalWeb starts for it. Adding a project does not move
+  or modify its files.
+- **Runtime** — the PHP version and supporting tools (Composer, Node.js,
+  database clients) used by a project. The Ubuntu and Arch packages bundle
+  them; macOS and Windows use native installations described below.
+- **Local domain** — a hostname such as `my-project.test` or
+  `my-project.dev` that LocalWeb maps to your machine. Its HTTPS
+  certificate is issued by the LocalWeb development CA.
+- **Daemon** — the background process that owns projects and services. The
+  desktop app, the `localweb` command and `localweb-mcp` all talk to this
+  same daemon, so they see the same state and apply the same checks.
+
+### Reading the examples
+
+Examples use `my-project` as a placeholder for the name you choose,
+`~/Code/my-project` as its source folder, and `my-project.dev` or
+`my-project.test` as its local domain. No project called "my-project" exists
+by default: replace the name, folder and domain with your own values.
 
 **Download the latest verified build from the
 [releases page](../../releases/tag/rolling):**
@@ -26,6 +55,38 @@ These links always point to the latest successful `main` build for all four
 platforms. The release notes list its version, source commit and checksums.
 Builds are published after testing, so a push may take time to appear here.
 [Stable releases](../../releases/latest) are separate snapshots.
+
+## Quick start
+
+1. Install the package for your OS from the links above, open the desktop
+   app and choose **Set up LocalWeb**. In a terminal the equivalent is:
+   ```bash
+   localweb setup
+   localweb ca install
+   ```
+2. Register an existing PHP application folder. In the desktop app choose
+   **Add project**; from the CLI run:
+   ```bash
+   localweb project add ~/Code/my-project --php 8.5 --web nginx \
+     --db mariadb --document-root public --domain my-project.test
+   ```
+3. Put the generated connection values into the application's own
+   configuration (`.env`, `wp-config.php`, and so on). Do not edit LocalWeb
+   files instead:
+   ```bash
+   localweb env my-project --format dotenv
+   ```
+   Set the application's base URL to the LocalWeb HTTPS address, for example
+   `https://my-project.test`.
+4. Start the project and open that address. The desktop app provides the
+   same **Start** and **Open** actions:
+   ```bash
+   localweb project start my-project
+   ```
+
+Stopping a project stops its services but keeps the project and its data.
+Removing a project deletes LocalWeb's configuration for it, not the source
+folder or the database.
 
 ## Tools and features
 
@@ -138,7 +199,11 @@ reloads its trust store.
 
 In the desktop app, open **Add project**, select an existing source folder,
 check its preset and document root, choose the runtime and services, then
-confirm with **Add project**. The source files are kept where they are.
+confirm with **Add project**. The folder must already contain the
+application: LocalWeb does not download framework code or create a new
+application for you. If the folder is empty, create the application with
+Composer or your framework's installer first. The source files are kept
+where they are.
 Before starting, open **Details → Show connection settings** and copy the
 database, Redis and email values into your app's configuration. Update its
 base URL to the LocalWeb HTTPS URL shown in Details. LocalWeb leaves your
