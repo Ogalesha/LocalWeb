@@ -56,7 +56,7 @@ mod database;
 mod proxy;
 mod services;
 use proxy::DbProxy;
-use services::{Services, is_active, php_unit};
+use services::{Services, is_active, php_unit, service_needs_restart, write_generated};
 
 /// Observed running set plus the state of its desired-state file.
 ///
@@ -1716,40 +1716,46 @@ fn apply_services(state: &State, active: &BTreeSet<String>) -> localweb_core::Re
     let has_apache = projects.iter().any(|p| p.web_server == WebServer::Apache);
     if has_nginx {
         let config = services.render_nginx(&projects)?;
-        let config_str = config
-            .to_str()
-            .ok_or_else(|| LocalWebError::Config("non-UTF-8 nginx config path".into()))?;
-        let runtime = RuntimeLayout::discover();
-        let nginx = runtime.nginx()?;
-        let prefix = runtime.nginx_prefix();
-        let prefix_str = prefix
-            .to_str()
-            .ok_or_else(|| LocalWebError::Config("non-UTF-8 nginx prefix".into()))?;
-        Services::start_or_restart(
-            "localweb-nginx",
-            &nginx,
-            &["-p", prefix_str, "-c", config_str, "-g", "daemon off;"],
-        )?;
+        if service_needs_restart(config.changed, is_active("localweb-nginx")) {
+            let config_str = config
+                .path
+                .to_str()
+                .ok_or_else(|| LocalWebError::Config("non-UTF-8 nginx config path".into()))?;
+            let runtime = RuntimeLayout::discover();
+            let nginx = runtime.nginx()?;
+            let prefix = runtime.nginx_prefix();
+            let prefix_str = prefix
+                .to_str()
+                .ok_or_else(|| LocalWebError::Config("non-UTF-8 nginx prefix".into()))?;
+            Services::start_or_restart(
+                "localweb-nginx",
+                &nginx,
+                &["-p", prefix_str, "-c", config_str, "-g", "daemon off;"],
+            )?;
+        }
     } else {
         Services::stop("localweb-nginx")?;
     }
     if has_apache {
         let config = services.render_apache(&projects)?;
-        let config_str = config
-            .to_str()
-            .ok_or_else(|| LocalWebError::Config("non-UTF-8 Apache config path".into()))?;
-        let runtime = RuntimeLayout::discover();
-        let apache = runtime.apache()?;
-        Services::start_or_restart(
-            "localweb-apache",
-            &apache,
-            &["-f", config_str, "-DFOREGROUND"],
-        )?;
+        if service_needs_restart(config.changed, is_active("localweb-apache")) {
+            let config_str = config
+                .path
+                .to_str()
+                .ok_or_else(|| LocalWebError::Config("non-UTF-8 Apache config path".into()))?;
+            let runtime = RuntimeLayout::discover();
+            let apache = runtime.apache()?;
+            Services::start_or_restart(
+                "localweb-apache",
+                &apache,
+                &["-f", config_str, "-DFOREGROUND"],
+            )?;
+        }
     } else {
         Services::stop("localweb-apache")?;
     }
-    write_routes(state, active)?;
-    start_gateway(state)
+    let routes_changed = write_routes(state, active)?;
+    start_gateway(state, routes_changed)
 }
 
 /// Rewrites derived routes after a committed project mutation.
@@ -1782,17 +1788,24 @@ async fn sync_gateway_routes(state: &Arc<State>) -> bool {
 /// The gateway reads its route table only at startup, so removing a stopped
 /// project still requires a restart when the gateway is already running.
 fn refresh_gateway_routes(state: &State, active: &BTreeSet<String>) -> localweb_core::Result<()> {
-    write_routes(state, active)?;
+    let routes_changed = write_routes(state, active)?;
     if is_active("localweb-gateway") {
-        start_gateway(state)?;
+        start_gateway(state, routes_changed)?;
     }
     Ok(())
 }
 
-fn start_gateway(state: &State) -> localweb_core::Result<()> {
+fn start_gateway(state: &State, routes_changed: bool) -> localweb_core::Result<()> {
     let gateway = std::env::current_exe()?
         .with_file_name(format!("localweb-gateway{}", std::env::consts::EXE_SUFFIX));
     let gateway_active = is_active("localweb-gateway");
+    // A running gateway already loaded the same routes and persisted endpoint.
+    // Missing endpoint state means the running instance cannot be trusted to
+    // match this configuration, so it is recreated like an inactive unit.
+    let gateway_current = gateway_active && load_gateway_endpoint(&state.paths).is_some();
+    if !service_needs_restart(routes_changed, gateway_current) {
+        return Ok(());
+    }
     let mut endpoint = select_gateway_endpoint(&state.paths, gateway_active)?;
     if let Err(primary) = start_gateway_service(&state.paths, &gateway, endpoint) {
         if endpoint.https_port != GATEWAY_HTTPS_PORT {
@@ -1849,7 +1862,7 @@ fn start_gateway_service(
     services::wait_for_unit_active("localweb-gateway", "HTTPS gateway")
 }
 
-fn write_routes(state: &State, active: &BTreeSet<String>) -> localweb_core::Result<()> {
+fn write_routes(state: &State, active: &BTreeSet<String>) -> localweb_core::Result<bool> {
     let routes: Vec<_> = load_projects(&state.paths)?
         .into_iter()
         .map(|project| {
@@ -1868,7 +1881,7 @@ fn write_routes(state: &State, active: &BTreeSet<String>) -> localweb_core::Resu
     }
     let bytes =
         serde_json::to_vec_pretty(&routes).map_err(|e| LocalWebError::Config(e.to_string()))?;
-    atomic_write(
+    write_generated(
         &state.paths.runtime.join("gateway-routes.json"),
         &bytes,
         0o600,
@@ -2731,22 +2744,32 @@ mod tests {
             routes_dirty: AtomicBool::new(false),
             shutdown: watch::channel(false).0,
         };
-        write_routes(
-            &state,
-            &BTreeSet::from([project.name.clone(), other.name.clone()]),
-        )
-        .unwrap();
+        assert!(
+            write_routes(
+                &state,
+                &BTreeSet::from([project.name.clone(), other.name.clone()]),
+            )
+            .unwrap()
+        );
         assert_eq!(gateway_routes(&state.paths).len(), 2);
+        assert!(
+            !write_routes(
+                &state,
+                &BTreeSet::from([project.name.clone(), other.name.clone()]),
+            )
+            .unwrap(),
+            "identical routes must not restart the gateway"
+        );
 
         fs::remove_file(state.paths.project_file(project.id)).unwrap();
-        write_routes(&state, &BTreeSet::from([other.name.clone()])).unwrap();
+        assert!(write_routes(&state, &BTreeSet::from([other.name.clone()])).unwrap());
         let routes = gateway_routes(&state.paths);
         assert_eq!(routes.len(), 1);
         assert_eq!(routes[0].hostname, other.hostname);
         assert_eq!(routes[0].upstream_port, other.web_port);
 
         fs::remove_file(state.paths.project_file(other.id)).unwrap();
-        write_routes(&state, &BTreeSet::new()).unwrap();
+        assert!(write_routes(&state, &BTreeSet::new()).unwrap());
         assert!(gateway_routes(&state.paths).is_empty());
         fs::remove_dir_all(base).unwrap();
     }

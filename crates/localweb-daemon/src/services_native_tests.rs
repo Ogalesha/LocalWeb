@@ -106,7 +106,7 @@ fn check_routing(with_spaces: bool) {
     let fpm_config = services
         .render_php(&project.php, &[project.clone()])
         .unwrap();
-    let fpm_process = spawn(&fpm, &["-n", "-F", "-y", fpm_config.to_str().unwrap()]);
+    let fpm_process = spawn(&fpm, &["-n", "-F", "-y", fpm_config.path.to_str().unwrap()]);
     wait_for_file(&services.php_socket(&project), "test PHP-FPM").unwrap();
     for web in [WebServer::Nginx, WebServer::Apache] {
         let reserved = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
@@ -123,7 +123,7 @@ fn check_routing(with_spaces: bool) {
                         "-p",
                         runtime.nginx_prefix().to_str().unwrap(),
                         "-c",
-                        config.to_str().unwrap(),
+                        config.path.to_str().unwrap(),
                         "-g",
                         "daemon off;",
                     ],
@@ -133,7 +133,7 @@ fn check_routing(with_spaces: bool) {
                 let config = services.render_apache(&[project.clone()]).unwrap();
                 spawn(
                     &runtime.apache().unwrap(),
-                    &["-f", config.to_str().unwrap(), "-DFOREGROUND"],
+                    &["-f", config.path.to_str().unwrap(), "-DFOREGROUND"],
                 )
             }
         };

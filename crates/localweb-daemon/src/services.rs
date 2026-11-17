@@ -28,6 +28,14 @@ mod admin;
 #[path = "services_native_tests.rs"]
 mod native_tests;
 
+/// A generated service configuration and whether it changed on disk.
+pub struct RenderedConfig {
+    /// File handed to the service executable.
+    pub path: PathBuf,
+    /// Whether writing replaced different bytes.
+    pub changed: bool,
+}
+
 /// Port for the shared MariaDB service on the loopback interface.
 const MARIADB_PORT: u16 = 33_071;
 /// Port for the shared MySQL service on the loopback interface.
@@ -65,6 +73,30 @@ pub(crate) struct ProjectSecrets {
     pub(crate) redis_port: Option<u16>,
     #[serde(default)]
     pub(crate) mail_smtp_port: Option<u16>,
+}
+
+/// Writes generated configuration only when its bytes changed.
+///
+/// Returns whether the file was replaced. Shared services skip a restart when
+/// every one of their inputs already matches the bytes they were started with.
+pub(crate) fn write_generated(path: &Path, bytes: &[u8], mode: u32) -> Result<bool> {
+    match fs::read(path) {
+        Ok(existing) if existing == bytes => Ok(false),
+        _ => {
+            atomic_write(path, bytes, mode)?;
+            Ok(true)
+        }
+    }
+}
+
+/// Whether a shared service must be (re)started for a configuration write.
+///
+/// An active unit that already loaded identical bytes stays untouched; a
+/// missing or inactive unit is always recreated, which also covers crashed
+/// and manually stopped services.
+#[must_use]
+pub(crate) const fn service_needs_restart(config_changed: bool, unit_active: bool) -> bool {
+    config_changed || !unit_active
 }
 
 pub struct Services<'a> {
@@ -497,8 +529,12 @@ impl Services<'_> {
             let (_, fpm) = self.php_binaries(version)?;
             let config = self.render_php(version, projects)?;
             let config_str = config
+                .path
                 .to_str()
                 .ok_or_else(|| LocalWebError::Config("non-UTF-8 FPM config path".into()))?;
+            if !service_needs_restart(config.changed, is_active(&php_unit(version))) {
+                return Ok(());
+            }
             if let Some(ini_path) = self.php_ini(version) {
                 let ini = ini_path.to_str().ok_or_else(|| {
                     LocalWebError::Config("non-UTF-8 PHP configuration path".into())
@@ -515,7 +551,7 @@ impl Services<'_> {
     }
 
     #[cfg(not(windows))]
-    pub fn render_php(&self, version: &str, projects: &[Project]) -> Result<PathBuf> {
+    pub fn render_php(&self, version: &str, projects: &[Project]) -> Result<RenderedConfig> {
         let dir = self.paths.config.join("generated/php").join(version);
         fs::create_dir_all(&dir)?;
         let runtime = self.paths.runtime.join("php").join(version);
@@ -533,7 +569,7 @@ impl Services<'_> {
             ).map_err(|error| LocalWebError::Config(format!("cannot render PHP-FPM pool: {error}")))?;
         }
         let pool_file = dir.join("pools.conf");
-        atomic_write(&pool_file, pools.as_bytes(), 0o600)?;
+        let changed = write_generated(&pool_file, pools.as_bytes(), 0o600)?;
         let config = format!(
             "[global]\npid = {pid}\nerror_log = {log}\ndaemonize = no\ninclude = {pool}\n",
             pid = runtime.join("php-fpm.pid").display(),
@@ -545,11 +581,14 @@ impl Services<'_> {
             pool = pool_file.display(),
         );
         let file = dir.join("php-fpm.conf");
-        atomic_write(&file, config.as_bytes(), 0o600)?;
-        Ok(file)
+        let changed = write_generated(&file, config.as_bytes(), 0o600)? || changed;
+        Ok(RenderedConfig {
+            path: file,
+            changed,
+        })
     }
 
-    pub fn render_nginx(&self, projects: &[Project]) -> Result<PathBuf> {
+    pub fn render_nginx(&self, projects: &[Project]) -> Result<RenderedConfig> {
         let dir = self.paths.config.join("generated/nginx");
         fs::create_dir_all(&dir)?;
         let mut servers = String::new();
@@ -578,11 +617,14 @@ impl Services<'_> {
             tmp = config_path(&tmp),
         );
         let file = dir.join("nginx.conf");
-        atomic_write(&file, config.as_bytes(), 0o600)?;
-        Ok(file)
+        let changed = write_generated(&file, config.as_bytes(), 0o600)?;
+        Ok(RenderedConfig {
+            path: file,
+            changed,
+        })
     }
 
-    pub fn render_apache(&self, projects: &[Project]) -> Result<PathBuf> {
+    pub fn render_apache(&self, projects: &[Project]) -> Result<RenderedConfig> {
         let dir = self.paths.config.join("generated/apache");
         fs::create_dir_all(&dir)?;
         let runtime = RuntimeLayout::discover();
@@ -654,8 +696,11 @@ impl Services<'_> {
             mime = config_path(&runtime.apache_mime_types()),
         );
         let file = dir.join("httpd.conf");
-        atomic_write(&file, config.as_bytes(), 0o600)?;
-        Ok(file)
+        let changed = write_generated(&file, config.as_bytes(), 0o600)?;
+        Ok(RenderedConfig {
+            path: file,
+            changed,
+        })
     }
 
     pub fn ensure_mariadb(&self) -> Result<()> {
@@ -1740,6 +1785,84 @@ mod tests {
         .unwrap();
         let project = Project::from_new(input, &localweb_core::GlobalConfig::default()).unwrap();
         (base, paths, project)
+    }
+
+    #[test]
+    fn unchanged_shared_configurations_do_not_request_restarts() {
+        let (base, paths, mut project) = fixture();
+        project.web_port = Some(40_100);
+        project.web_server = WebServer::Nginx;
+        let services = Services { paths: &paths };
+        assert!(
+            services
+                .render_nginx(std::slice::from_ref(&project))
+                .unwrap()
+                .changed
+        );
+        assert!(
+            !services
+                .render_nginx(std::slice::from_ref(&project))
+                .unwrap()
+                .changed
+        );
+        project.hostname = "renamed.test".into();
+        assert!(
+            services
+                .render_nginx(std::slice::from_ref(&project))
+                .unwrap()
+                .changed
+        );
+        project.web_server = WebServer::Apache;
+        assert!(
+            services
+                .render_apache(std::slice::from_ref(&project))
+                .unwrap()
+                .changed
+        );
+        assert!(
+            !services
+                .render_apache(std::slice::from_ref(&project))
+                .unwrap()
+                .changed
+        );
+        project.web_port = Some(40_101);
+        assert!(
+            services
+                .render_apache(std::slice::from_ref(&project))
+                .unwrap()
+                .changed
+        );
+        assert!(!service_needs_restart(false, true));
+        assert!(service_needs_restart(true, true));
+        assert!(service_needs_restart(false, false));
+        fs::remove_dir_all(base).unwrap();
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn unchanged_php_pool_configuration_does_not_request_a_restart() {
+        let (base, paths, mut project) = fixture();
+        let services = Services { paths: &paths };
+        assert!(
+            services
+                .render_php(&project.php, std::slice::from_ref(&project))
+                .unwrap()
+                .changed
+        );
+        assert!(
+            !services
+                .render_php(&project.php, std::slice::from_ref(&project))
+                .unwrap()
+                .changed
+        );
+        project.resources.fpm_max_children += 1;
+        assert!(
+            services
+                .render_php(&project.php, std::slice::from_ref(&project))
+                .unwrap()
+                .changed
+        );
+        fs::remove_dir_all(base).unwrap();
     }
 
     #[test]
