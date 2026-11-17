@@ -249,7 +249,7 @@ Open **Settings → Shell integration** in the desktop app. The card shows:
 - whether the five shims are installed;
 - the shim folder;
 - the shell startup file (or the user `PATH` on Windows);
-- whether the current session has loaded the shims;
+- whether the app's environment already sees the shim folder on `PATH`;
 - **Install**, **Reinstall** and **Remove integration** actions.
 
 Installing from the app is safe and idempotent: the managed block is replaced
