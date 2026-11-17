@@ -172,6 +172,11 @@ where
     }
     let lock = lock_project(state, name).await;
     let _guard = lock.lock().await;
+    // Database work reads and writes the same shared engines that project
+    // start/stop and shutdown manage. Take the daemon phase lock after the
+    // project lock, matching ProjectUpdate/ProjectRemove, so a long import or
+    // restore can never race an engine stop.
+    let _operations = state.begin_operation().await?;
     let project = find_project(&paths, name)?;
     tokio::task::spawn_blocking(move || operation(&paths, &project))
         .await

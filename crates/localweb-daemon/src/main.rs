@@ -2804,6 +2804,38 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn database_requests_require_the_serving_phase() {
+        let (base, paths, mut project) = project_fixture();
+        project.database = localweb_core::Database::Sqlite;
+        save_project(&paths, &project).unwrap();
+        let state = test_state(paths);
+        *state.operations.lock().await = DaemonPhase::Restoring;
+        let denied = dispatch(
+            Request::DatabaseSnapshotList {
+                project: "demo".into(),
+            },
+            &state,
+        )
+        .await;
+        let Response::Error { code, message } = denied else {
+            panic!("database request bypassed the restoration phase");
+        };
+        assert_eq!(code, "ServiceStartFailed");
+        assert!(message.contains("could not finish starting"));
+        *state.operations.lock().await = DaemonPhase::Serving;
+        let allowed = execute(
+            Request::DatabaseSnapshotList {
+                project: "demo".into(),
+            },
+            &state,
+        )
+        .await
+        .unwrap();
+        assert!(matches!(allowed, Response::Snapshots(_)));
+        fs::remove_dir_all(base).unwrap();
+    }
+
+    #[tokio::test]
     async fn status_and_project_list_expose_recovery_projects() {
         let (base, paths, project) = project_fixture();
         save_project(&paths, &project).unwrap();
