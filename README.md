@@ -174,11 +174,11 @@ creation time are preserved. The same applies to the desktop edit form.
 For example:
 
 ```bash
-localweb project update acme --php 8.4 --web apache
-localweb project update acme --db postgres --cache redis --mail
-localweb project update acme --no-mail --no-autostart
-localweb project update acme --clear-cron
-localweb project update acme --cron '*/10 * * * * @php artisan schedule:run'
+localweb project update my-project --php 8.4 --web apache
+localweb project update my-project --db postgres --cache redis --mail
+localweb project update my-project --no-mail --no-autostart
+localweb project update my-project --clear-cron
+localweb project update my-project --cron '*/10 * * * * @php artisan schedule:run'
 ```
 
 `--supervisor` enables the profile worker preset, `--no-supervisor` disables
@@ -188,13 +188,13 @@ flags the current worker configuration is kept.
 For a terminal workflow:
 
 ```bash
-localweb project add ~/Code/acme --php 8.5 --web nginx \
-  --db mariadb --cache redis --document-root public --domain acme.dev
-localweb env acme --format dotenv
+localweb project add ~/Code/my-project --php 8.5 --web nginx \
+  --db mariadb --cache redis --document-root public --domain my-project.dev
+localweb env my-project --format dotenv
 # Apply these values to the app's config; import existing data if needed.
-localweb composer acme -- install
-localweb project start acme
-localweb php acme -- -v
+localweb composer my-project -- install
+localweb project start my-project
+localweb php my-project -- -v
 ```
 
 Choose a different stack for another project:
@@ -211,7 +211,7 @@ Redis and email values. **Copy as .env** copies them; LocalWeb does not edit
 your app's configuration file. From the CLI:
 
 ```bash
-localweb env acme --format dotenv
+localweb env my-project --format dotenv
 ```
 
 Start prints the direct URL (`http://127.0.0.1:<web port>`); pin the ports
@@ -247,18 +247,18 @@ localweb status
 localweb doctor
 localweb runtime list
 localweb project list
-localweb project info acme
-localweb project update acme --php 8.4
-localweb project restart acme
-localweb project stop acme
-localweb project remove acme
-localweb node acme -- --version
-localweb npm acme -- run build
-localweb npx acme -- --version
-localweb exec acme -- php artisan about
-localweb shell acme
-localweb db snapshot create acme --name before-migration
-localweb db export acme ~/Backups/acme.sql.zst
+localweb project info my-project
+localweb project update my-project --php 8.4
+localweb project restart my-project
+localweb project stop my-project
+localweb project remove my-project
+localweb node my-project -- --version
+localweb npm my-project -- run build
+localweb npx my-project -- --version
+localweb exec my-project -- php artisan about
+localweb shell my-project
+localweb db snapshot create my-project --name before-migration
+localweb db export my-project ~/Backups/my-project.sql.zst
 localweb autostart enable
 localweb shutdown
 ```
@@ -287,17 +287,17 @@ export and SQL import. Open **Details → Database Management** in the desktop
 app, or use the same operations from the CLI:
 
 ```bash
-localweb db snapshot create acme --name before-migration
-localweb db snapshot list acme
-localweb db snapshot restore acme --latest --yes
-localweb db snapshot restore acme before-migration --no-safety --yes
-localweb db snapshot delete acme before-migration --yes
-localweb db snapshot cleanup acme --yes
+localweb db snapshot create my-project --name before-migration
+localweb db snapshot list my-project
+localweb db snapshot restore my-project --latest --yes
+localweb db snapshot restore my-project before-migration --no-safety --yes
+localweb db snapshot delete my-project before-migration --yes
+localweb db snapshot cleanup my-project --yes
 
-localweb db export acme ~/Backups/acme.sql.zst
-localweb db export acme --stdout --compression gzip > acme.sql.gz
-localweb db import acme ~/Backups/acme.sql.zst --yes
-localweb db import acme ~/Backups/partial.sql --no-drop --yes
+localweb db export my-project ~/Backups/my-project.sql.zst
+localweb db export my-project --stdout --compression gzip > my-project.sql.gz
+localweb db import my-project ~/Backups/my-project.sql.zst --yes
+localweb db import my-project ~/Backups/partial.sql --no-drop --yes
 ```
 
 Snapshots contain database state only. They never include project files, PHP
@@ -331,8 +331,8 @@ storage layout, engine behaviour and troubleshooting.
 on your `PATH` and makes them follow the folder you are in:
 
 ```bash
-cd ~/code/acme
-php -v            # the PHP version configured for the acme project
+cd ~/code/my-project
+php -v            # the PHP version configured for my-project
 composer install  # Composer running with that same PHP
 
 cd ~
@@ -363,7 +363,7 @@ IDE tasks and pipelines stay quiet. An explicit `LOCALWEB_PROJECT`, which is
 how `localweb shell` marks its sessions, stays strict instead: a stopped daemon
 is reported rather than hidden. `LOCALWEB_NO_SHIM=1` bypasses the shims for a
 single command, and the explicit forms keep working:
-`localweb php acme -- -v` and `localweb exec acme -- php artisan about`.
+`localweb php my-project -- -v` and `localweb exec my-project -- php artisan about`.
 
 ```bash
 localweb integration status

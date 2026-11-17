@@ -101,34 +101,34 @@ Examples:
 
 ```bash
 # Take a named snapshot before a migration.
-localweb db snapshot create acme --name before-migration
+localweb db snapshot create my-project --name before-migration
 
 # Review snapshots, newest first.
-localweb db snapshot list acme
+localweb db snapshot list my-project
 
 # Restore the newest normal snapshot. A safety snapshot is created first.
-localweb db snapshot restore acme --latest --yes
+localweb db snapshot restore my-project --latest --yes
 
 # Restore an exact snapshot without the automatic safety copy.
-localweb db snapshot restore acme before-migration --no-safety --yes
+localweb db snapshot restore my-project before-migration --no-safety --yes
 
 # Delete one snapshot, or every snapshot for the project.
-localweb db snapshot delete acme before-migration --yes
-localweb db snapshot cleanup acme --yes
+localweb db snapshot delete my-project before-migration --yes
+localweb db snapshot cleanup my-project --yes
 
 # Export using the compression implied by the extension.
-localweb db export acme ~/Backups/acme.sql
-localweb db export acme ~/Backups/acme.sql.gz
-localweb db export acme ~/Backups/acme.sql.zst
+localweb db export my-project ~/Backups/my-project.sql
+localweb db export my-project ~/Backups/my-project.sql.gz
+localweb db export my-project ~/Backups/my-project.sql.zst
 
 # Stream a compressed export without a destination file.
-localweb db export acme --stdout --compression zstd > acme.sql.zst
+localweb db export my-project --stdout --compression zstd > my-project.sql.zst
 
 # Import replaces existing objects by default and takes a safety snapshot.
-localweb db import acme ~/Backups/acme.sql.zst --yes
+localweb db import my-project ~/Backups/my-project.sql.zst --yes
 
 # Merge into the existing schema instead of dropping objects first.
-localweb db import acme ~/Backups/partial.sql --no-drop --yes
+localweb db import my-project ~/Backups/partial.sql --no-drop --yes
 ```
 
 Mutating commands prompt on a terminal and require `--yes` when standard input
@@ -149,7 +149,7 @@ does not leave a truncated destination.
 go to standard error, which makes it safe to pipe into another program:
 
 ```bash
-localweb db export acme --stdout --compression gzip | gzip -t
+localweb db export my-project --stdout --compression gzip | gzip -t
 ```
 
 ### Import rules

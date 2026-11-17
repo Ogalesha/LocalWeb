@@ -3146,7 +3146,7 @@ impl LocalWebApp {
                                 ui,
                                 &mut self.form.path,
                                 field_width,
-                                "~/Code/acme",
+                                "~/Code/my-project",
                             )
                             .labelled_by(label.id);
                             if response.lost_focus() {

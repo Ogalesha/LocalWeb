@@ -49,9 +49,9 @@ sudo installer -pkg dist/LocalWeb-0.1.3.pkg -target /
 # 3. Per-user setup (each privileged step asks for an administrator password).
 localweb setup          # LaunchAgents, CA in ~/.local/share/localweb, path registry
 localweb ca install     # System keychain trust
-localweb project add ~/Sites/acme --name acme --php 8.5 --web-server nginx
+localweb project add ~/Sites/my-project --name my-project --php 8.5 --web-server nginx
 localweb start
-open https://acme.dev
+open https://my-project.dev
 ```
 
 The daemon and gateway logs live in `~/.local/state/localweb/logs/`
