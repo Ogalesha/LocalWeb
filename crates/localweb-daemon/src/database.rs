@@ -2771,7 +2771,7 @@ mod tests {
         scanner.copy_data = true;
         scanner.mode = ScanMode::CopyData;
         let visible = scanner.visible(b"GRANT ALL;\n");
-        assert!(String::from_utf8_lossy(&visible).trim().is_empty());
+        assert_eq!(String::from_utf8_lossy(&visible).trim(), "");
         check_sql_line(
             Database::Postgres,
             &String::from_utf8_lossy(&visible),
@@ -3223,7 +3223,7 @@ mod tests {
         assert_eq!(deleted.reclaimed_bytes, Some(5));
         let cleaned = store.cleanup().unwrap();
         assert_eq!(cleaned.removed, Some(1));
-        assert!(store.list().unwrap().is_empty());
+        assert_eq!(store.list().unwrap().len(), 0);
         let _ = fs::remove_dir_all(base);
     }
 
@@ -3251,7 +3251,7 @@ mod tests {
         let payload = store.root.join(&snapshot.id).join("database.sql.zst");
         let original = fs::read(&payload).unwrap();
         fs::write(&payload, b"short").unwrap();
-        assert!(store.list().unwrap().is_empty());
+        assert_eq!(store.list().unwrap().len(), 0);
         fs::write(&payload, &original).unwrap();
         fs::write(&payload, b"corrupt").unwrap();
         assert_eq!(store.list().unwrap().len(), 1);

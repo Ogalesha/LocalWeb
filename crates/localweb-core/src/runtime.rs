@@ -668,8 +668,7 @@ impl RuntimeLayout {
                 server
                     .parent()
                     .and_then(Path::parent)
-                    .map(Path::to_path_buf)
-                    .unwrap_or_else(|| self.root.join("mariadb"))
+                    .map_or_else(|| self.root.join("mariadb"), Path::to_path_buf)
             }) {
                 candidates.push(base.join("bin/mariadb-dump.exe"));
                 candidates.push(base.join("bin/mysqldump.exe"));
@@ -713,8 +712,7 @@ impl RuntimeLayout {
                 server
                     .parent()
                     .and_then(Path::parent)
-                    .map(Path::to_path_buf)
-                    .unwrap_or_else(|| self.root.join("mysql"))
+                    .map_or_else(|| self.root.join("mysql"), Path::to_path_buf)
             }) {
                 candidates.push(base.join("bin/mysqldump.exe"));
             }

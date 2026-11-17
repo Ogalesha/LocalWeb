@@ -1321,7 +1321,11 @@ mod tests {
         assert!(error.contains("confirm"));
         require_confirm(&json!({ "confirm": "yes" })).unwrap_err();
         absolute_path(&json!({ "path": "relative.sql" }), "path").unwrap_err();
-        absolute_path(&json!({ "path": "/tmp/demo.sql" }), "path").unwrap();
+        #[cfg(windows)]
+        let absolute = r"C:\Temp\demo.sql";
+        #[cfg(not(windows))]
+        let absolute = "/tmp/demo.sql";
+        absolute_path(&json!({ "path": absolute }), "path").unwrap();
     }
 
     #[test]
