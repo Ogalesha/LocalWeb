@@ -199,7 +199,6 @@ impl RunningState {
 enum StartMode {
     Start,
     Restore,
-    Restart,
 }
 
 struct State {
@@ -861,7 +860,15 @@ async fn start_project(state: &Arc<State>, name: &str) -> localweb_core::Result<
 async fn restart_project(state: &Arc<State>, name: &str) -> localweb_core::Result<()> {
     let _operations = state.begin_operation().await?;
     cancel_project_cron(state, name).await;
-    start_project_locked(state, name, StartMode::Restart).await
+    // A restart of a running project is an explicit stop followed by a start.
+    // The stop releases every project-owned unit and rewrites shared
+    // configuration, and the subsequent start re-runs the port guard against
+    // the now-empty running set. Recovery projects stay refused until their
+    // own cleanup stop, because they are not marked running.
+    if state.running.lock().await.contains(name) {
+        stop_project_locked(state, name).await?;
+    }
+    start_project_locked(state, name, StartMode::Start).await
 }
 
 async fn start_project_locked(
@@ -887,11 +894,7 @@ async fn start_project_locked(
             .await
             .get(name)
             .is_some_and(DbProxy::is_running);
-    if old.contains(name)
-        && mode != StartMode::Restart
-        && proxy_ready
-        && Services::project_is_active(&project)
-    {
+    if old.contains(name) && proxy_ready && Services::project_is_active(&project) {
         return Ok(());
     }
     let mut next = old.clone();
@@ -2967,6 +2970,57 @@ mod tests {
         assert_eq!(code, "ServiceStartFailed");
         assert!(message.contains("needs cleanup"));
         assert!(state.running.lock().await.needs_recovery("demo"));
+        fs::remove_dir_all(base).unwrap();
+    }
+
+    #[tokio::test]
+    async fn restarting_a_recovery_project_still_requires_an_explicit_stop() {
+        let (base, paths, project) = project_fixture();
+        save_project(&paths, &project).unwrap();
+        let state = test_state(paths);
+        state
+            .running
+            .lock()
+            .await
+            .projects
+            .insert("demo".into(), ProjectRuntime::RecoveryNeeded);
+        let response = dispatch(
+            Request::ProjectRestart {
+                name: "demo".into(),
+            },
+            &state,
+        )
+        .await;
+        let Response::Error { message, .. } = response else {
+            panic!("recovery project restarted without cleanup");
+        };
+        assert!(message.contains("needs cleanup"));
+        assert!(state.running.lock().await.needs_recovery("demo"));
+        fs::remove_dir_all(base).unwrap();
+    }
+
+    #[tokio::test]
+    async fn restarting_a_stopped_project_applies_the_web_port_guard() {
+        let (base, paths, mut project) = project_fixture();
+        let reserved = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let port = reserved.local_addr().unwrap().port();
+        project.web_port = Some(port);
+        save_project(&paths, &project).unwrap();
+        let state = test_state(paths);
+        let response = dispatch(
+            Request::ProjectRestart {
+                name: project.name.clone(),
+            },
+            &state,
+        )
+        .await;
+        let Response::Error { code, message } = response else {
+            panic!("restart accepted an occupied web port");
+        };
+        assert_eq!(code, "InvalidConfiguration");
+        assert!(message.contains("already in use"), "{message}");
+        assert!(state.running.lock().await.snapshot().is_empty());
+        drop(reserved);
         fs::remove_dir_all(base).unwrap();
     }
 
