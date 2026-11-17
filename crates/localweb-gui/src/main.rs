@@ -919,10 +919,12 @@ impl LocalWebApp {
                 Action::StartDaemon => {
                     self.queued_add = None;
                     self.daemon = self.daemon.after_start_error();
+                    self.refresh_shell_integration();
                 }
                 Action::Setup => {
                     self.queued_add = None;
                     self.daemon = self.daemon.after_setup_error();
+                    self.refresh_shell_integration();
                 }
                 _ => {}
             }
@@ -930,8 +932,8 @@ impl LocalWebApp {
         match (action, result) {
             (Action::Setup, Ok(_)) => {
                 self.notice = Some(Notice::success(self.lang.notice_setup()));
-                self.refresh_shell_integration();
                 self.start_daemon();
+                self.refresh_shell_integration();
             }
             (Action::InstallCa, Ok(_)) => {
                 self.notice = Some(Notice::success(self.lang.notice_ca()));
@@ -971,6 +973,10 @@ impl LocalWebApp {
                 // Send a queued project only after a status reply proves it is
                 // reachable; the periodic refresh retries if this one races.
                 self.refresh_all();
+                // Setup installs the integration before starting the daemon;
+                // a query issued in the setup handler is superseded by this
+                // mutation, so read the final state once the mutation lands.
+                self.refresh_shell_integration();
             }
             (Action::SyncHosts, Ok(_)) => {
                 self.notice = Some(Notice::success(self.lang.notice_hosts()));
