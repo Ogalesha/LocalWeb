@@ -1,8 +1,8 @@
 use anyhow::{Context, Result};
 use localweb_core::{
-    CaStatus, Diagnostic, Envelope, ExecutionSpec, GatewayRoute, GlobalConfig, LocalWebError,
-    MAX_MESSAGE_BYTES, PROTOCOL_VERSION, Paths, Project, ProjectStatus, Request, Response, Status,
-    WebServer, atomic_write, certificate::CaPaths, runtime::RuntimeLayout,
+    CaStatus, DaemonPhase, Diagnostic, Envelope, ExecutionSpec, GatewayRoute, GlobalConfig,
+    LocalWebError, MAX_MESSAGE_BYTES, PROTOCOL_VERSION, Paths, Project, ProjectStatus, Request,
+    Response, Status, WebServer, atomic_write, certificate::CaPaths, runtime::RuntimeLayout,
 };
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -196,14 +196,6 @@ impl RunningState {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum DaemonPhase {
-    Restoring,
-    Serving,
-    Stopping,
-    Stopped,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum StartMode {
     Start,
     Restore,
@@ -214,7 +206,10 @@ struct State {
     paths: Paths,
     config: GlobalConfig,
     running: Mutex<RunningState>,
-    operations: Mutex<DaemonPhase>,
+    /// Serializes mutations. The phase itself is mirrored in `phase` so a
+    /// status probe never waits for restoration to release this lock.
+    operations: Mutex<()>,
+    phase: std::sync::atomic::AtomicU8,
     ready: AtomicBool,
     db_proxies: Mutex<BTreeMap<String, DbProxy>>,
     database_locks: Mutex<BTreeMap<String, std::sync::Arc<tokio::sync::Mutex<()>>>>,
@@ -227,21 +222,34 @@ struct State {
 }
 
 impl State {
-    async fn begin_operation(
-        &self,
-    ) -> localweb_core::Result<tokio::sync::MutexGuard<'_, DaemonPhase>> {
-        let phase = self.operations.lock().await;
-        if *phase == DaemonPhase::Restoring {
-            return Err(LocalWebError::Service(
+    fn phase(&self) -> DaemonPhase {
+        daemon_phase(self.phase.load(Ordering::Acquire))
+    }
+
+    fn set_phase(&self, phase: DaemonPhase) {
+        self.phase.store(phase as u8, Ordering::Release);
+    }
+
+    async fn begin_operation(&self) -> localweb_core::Result<tokio::sync::MutexGuard<'_, ()>> {
+        let guard = self.operations.lock().await;
+        match self.phase() {
+            DaemonPhase::Restoring => Err(LocalWebError::Service(
                 "LocalWeb could not finish starting; check its daemon log".into(),
-            ));
-        }
-        if *phase != DaemonPhase::Serving {
-            return Err(LocalWebError::Service(
+            )),
+            DaemonPhase::Serving => Ok(guard),
+            DaemonPhase::Stopping | DaemonPhase::Stopped => Err(LocalWebError::Service(
                 "LocalWeb is stopping; start it again before changing projects".into(),
-            ));
+            )),
         }
-        Ok(phase)
+    }
+}
+
+const fn daemon_phase(code: u8) -> DaemonPhase {
+    match code {
+        0 => DaemonPhase::Restoring,
+        1 => DaemonPhase::Serving,
+        2 => DaemonPhase::Stopping,
+        _ => DaemonPhase::Stopped,
     }
 }
 
@@ -275,7 +283,8 @@ async fn main() -> Result<()> {
         paths,
         config,
         running: Mutex::new(RunningState::new()),
-        operations: Mutex::new(DaemonPhase::Restoring),
+        operations: Mutex::new(()),
+        phase: std::sync::atomic::AtomicU8::new(DaemonPhase::Restoring as u8),
         ready: AtomicBool::new(false),
         db_proxies: Mutex::new(BTreeMap::new()),
         cron_jobs: Mutex::new(BTreeMap::new()),
@@ -334,7 +343,7 @@ async fn main() -> Result<()> {
 async fn restore_services(
     state: &Arc<State>,
     restore: BTreeSet<String>,
-    mut phase: tokio::sync::MutexGuard<'_, DaemonPhase>,
+    _operations: tokio::sync::MutexGuard<'_, ()>,
 ) -> Result<()> {
     // The listener remains responsive to read-only probes. Mutations queue
     // behind this guard until restoration has committed its result.
@@ -377,7 +386,7 @@ async fn restore_services(
     if let Err(error) = state.running.lock().await.force_persist(&state.paths) {
         error!(%error, "could not persist restored projects; will retry");
     }
-    *phase = DaemonPhase::Serving;
+    state.set_phase(DaemonPhase::Serving);
     state.ready.store(true, Ordering::Release);
     Ok(())
 }
@@ -472,6 +481,7 @@ async fn execute(request: Request, state: &Arc<State>) -> localweb_core::Result<
             Ok(Response::Status(Status {
                 daemon_running: true,
                 ready: state.ready.load(Ordering::Acquire),
+                phase: Some(state.phase()),
                 gateway_running,
                 gateway_bind_address: gateway_endpoint.map(|endpoint| endpoint.bind_address),
                 gateway_https_port: gateway_endpoint.map(|endpoint| endpoint.https_port),
@@ -481,8 +491,8 @@ async fn execute(request: Request, state: &Arc<State>) -> localweb_core::Result<
             }))
         }
         Request::Shutdown => {
-            let mut phase = state.begin_operation().await?;
-            *phase = DaemonPhase::Stopping;
+            let _operations = state.begin_operation().await?;
+            state.set_phase(DaemonPhase::Stopping);
             state.ready.store(false, Ordering::Release);
             cancel_all_cron(state).await;
             let proxies = std::mem::take(&mut *state.db_proxies.lock().await);
@@ -504,11 +514,11 @@ async fn execute(request: Request, state: &Arc<State>) -> localweb_core::Result<
                         .await
                         .commit(&state.paths, BTreeSet::new())
                     {
-                        *phase = DaemonPhase::Serving;
+                        state.set_phase(DaemonPhase::Serving);
                         state.ready.store(true, Ordering::Release);
                         return Err(error);
                     }
-                    *phase = DaemonPhase::Stopped;
+                    state.set_phase(DaemonPhase::Stopped);
                     Ok(Response::Message(
                         localweb_core::copy::LOCALWEB_STOPPED.into(),
                     ))
@@ -516,7 +526,7 @@ async fn execute(request: Request, state: &Arc<State>) -> localweb_core::Result<
                 Err(error) => {
                     let active = state.running.lock().await.snapshot();
                     require_recovery(state, &active).await;
-                    *phase = DaemonPhase::Serving;
+                    state.set_phase(DaemonPhase::Serving);
                     state.ready.store(true, Ordering::Release);
                     error!(%error, "shutdown left services running; desired state was preserved");
                     Err(error)
@@ -2711,7 +2721,8 @@ mod tests {
             paths,
             config: GlobalConfig::default(),
             running: Mutex::new(RunningState::new()),
-            operations: Mutex::new(DaemonPhase::Serving),
+            operations: Mutex::new(()),
+            phase: std::sync::atomic::AtomicU8::new(DaemonPhase::Serving as u8),
             ready: AtomicBool::new(true),
             db_proxies: Mutex::new(BTreeMap::new()),
             database_locks: Mutex::new(BTreeMap::new()),
@@ -2745,7 +2756,8 @@ mod tests {
             paths,
             config: GlobalConfig::default(),
             running: Mutex::new(RunningState::new()),
-            operations: Mutex::new(DaemonPhase::Serving),
+            operations: Mutex::new(()),
+            phase: std::sync::atomic::AtomicU8::new(DaemonPhase::Serving as u8),
             ready: AtomicBool::new(true),
             db_proxies: Mutex::new(BTreeMap::new()),
             database_locks: Mutex::new(BTreeMap::new()),
@@ -2814,7 +2826,7 @@ mod tests {
         project.database = localweb_core::Database::Sqlite;
         save_project(&paths, &project).unwrap();
         let state = test_state(paths);
-        *state.operations.lock().await = DaemonPhase::Restoring;
+        state.set_phase(DaemonPhase::Restoring);
         let denied = dispatch(
             Request::DatabaseSnapshotList {
                 project: "demo".into(),
@@ -2827,7 +2839,7 @@ mod tests {
         };
         assert_eq!(code, "ServiceStartFailed");
         assert!(message.contains("could not finish starting"));
-        *state.operations.lock().await = DaemonPhase::Serving;
+        state.set_phase(DaemonPhase::Serving);
         let allowed = execute(
             Request::DatabaseSnapshotList {
                 project: "demo".into(),
@@ -2997,7 +3009,8 @@ mod tests {
             paths,
             config: GlobalConfig::default(),
             running: Mutex::new(RunningState::new()),
-            operations: Mutex::new(DaemonPhase::Serving),
+            operations: Mutex::new(()),
+            phase: std::sync::atomic::AtomicU8::new(DaemonPhase::Serving as u8),
             ready: AtomicBool::new(true),
             db_proxies: Mutex::new(BTreeMap::new()),
             database_locks: Mutex::new(BTreeMap::new()),
@@ -3009,12 +3022,12 @@ mod tests {
         let job = tokio::spawn(std::future::pending());
         let cancelled = job.abort_handle();
         state.cron_jobs.lock().await.insert(("demo".into(), 0), job);
-        *state.operations.lock().await = DaemonPhase::Stopping;
+        state.set_phase(DaemonPhase::Stopping);
         state.begin_operation().await.unwrap_err();
         cancel_all_cron(&state).await;
         assert!(cancelled.is_finished());
         assert!(state.cron_jobs.lock().await.is_empty());
-        *state.operations.lock().await = DaemonPhase::Stopped;
+        state.set_phase(DaemonPhase::Stopped);
         state.begin_operation().await.unwrap_err();
         fs::remove_dir_all(base).unwrap();
     }
@@ -3026,7 +3039,8 @@ mod tests {
             paths,
             config: GlobalConfig::default(),
             running: Mutex::new(RunningState::new()),
-            operations: Mutex::new(DaemonPhase::Restoring),
+            operations: Mutex::new(()),
+            phase: std::sync::atomic::AtomicU8::new(DaemonPhase::Restoring as u8),
             ready: AtomicBool::new(false),
             db_proxies: Mutex::new(BTreeMap::new()),
             database_locks: Mutex::new(BTreeMap::new()),
@@ -3035,15 +3049,16 @@ mod tests {
             routes_dirty: AtomicBool::new(false),
             shutdown: watch::channel(false).0,
         });
-        let mut guard = state.operations.lock().await;
+        let guard = state.operations.lock().await;
         let status = tokio::time::timeout(Duration::from_secs(2), execute(Request::Status, &state))
             .await
             .unwrap()
             .unwrap();
-        assert!(matches!(
-            status,
-            Response::Status(Status { ready: false, .. })
-        ));
+        let Response::Status(status) = status else {
+            panic!("expected a status response");
+        };
+        assert!(!status.ready);
+        assert_eq!(status.phase, Some(DaemonPhase::Restoring));
         let input = serde_json::from_value(serde_json::json!({"path":project.path,"name":"queued","hostname":"queued.test","autostart":false})).unwrap();
         let mutation = execute(Request::ProjectAdd(input), &state);
         tokio::pin!(mutation);
@@ -3051,7 +3066,7 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(load_projects(&state.paths).unwrap(), Vec::<Project>::new());
-        *guard = DaemonPhase::Serving;
+        state.set_phase(DaemonPhase::Serving);
         state.ready.store(true, Ordering::Release);
         drop(guard);
         assert!(matches!(mutation.await.unwrap(), Response::Project(_)));
@@ -3066,7 +3081,8 @@ mod tests {
             paths,
             config: GlobalConfig::default(),
             running: Mutex::new(RunningState::new()),
-            operations: Mutex::new(DaemonPhase::Serving),
+            operations: Mutex::new(()),
+            phase: std::sync::atomic::AtomicU8::new(DaemonPhase::Serving as u8),
             ready: AtomicBool::new(true),
             db_proxies: Mutex::new(BTreeMap::new()),
             database_locks: Mutex::new(BTreeMap::new()),

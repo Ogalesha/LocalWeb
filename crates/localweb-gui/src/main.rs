@@ -10,8 +10,8 @@ use eframe::egui::{self, Color32, RichText, Stroke, Vec2};
 use icons::Icon;
 use lang::Lang;
 use localweb_core::{
-    CaStatus, Cache, Database, GlobalConfig, NewProject, Paths, Profile, Project, ProjectStatus,
-    Request, Response, ShellIntegrationStatus, Status, SupervisorConfig, WebServer,
+    CaStatus, Cache, DaemonPhase, Database, GlobalConfig, NewProject, Paths, Profile, Project,
+    ProjectStatus, Request, Response, ShellIntegrationStatus, Status, SupervisorConfig, WebServer,
     database::{DatabaseOperationResult, DatabaseSnapshot, SnapshotSelector},
     default_supervisor_command, detect_profile, sanitize_name, send_request,
 };
@@ -176,6 +176,27 @@ impl DaemonState {
         match self {
             Self::Stopping | Self::SettingUp => self,
             _ => Self::Starting,
+        }
+    }
+
+    /// Applies the lifecycle phase reported by a serving daemon.
+    ///
+    /// Older daemons omit the phase; callers then use the `ready` fallback.
+    fn after_phase(self, phase: DaemonPhase) -> Self {
+        if self == Self::SettingUp {
+            return self;
+        }
+        match phase {
+            DaemonPhase::Restoring => match self {
+                Self::Stopping => self,
+                _ => Self::Starting,
+            },
+            DaemonPhase::Serving => match self {
+                Self::Stopping => self,
+                _ => Self::Running,
+            },
+            DaemonPhase::Stopping => Self::Stopping,
+            DaemonPhase::Stopped => Self::Stopped,
         }
     }
 
@@ -790,10 +811,10 @@ impl LocalWebApp {
         let shutdown = matches!(&action, Action::Shutdown);
         match (action, response) {
             (Action::RefreshStatus, Response::Status(status)) => {
-                self.daemon = if status.ready {
-                    self.daemon.after_status_ok()
-                } else {
-                    self.daemon.after_status_not_ready()
+                self.daemon = match status.phase {
+                    Some(phase) => self.daemon.after_phase(phase),
+                    None if status.ready => self.daemon.after_status_ok(),
+                    None => self.daemon.after_status_not_ready(),
                 };
                 if status.ready {
                     self.startup_deadline = None;
@@ -4922,6 +4943,7 @@ mod tests {
                 result: Box::new(Ok(Response::Status(Status {
                     daemon_running: true,
                     ready: true,
+                    phase: None,
                     gateway_running: true,
                     gateway_bind_address: None,
                     gateway_https_port: None,
@@ -4982,6 +5004,7 @@ mod tests {
         Status {
             daemon_running: true,
             ready,
+            phase: None,
             gateway_running: false,
             gateway_bind_address: None,
             gateway_https_port: None,
@@ -4989,6 +5012,29 @@ mod tests {
             active_projects: 0,
             projects_needing_recovery: Vec::new(),
         }
+    }
+
+    #[test]
+    fn status_phase_maps_directly_to_daemon_state() {
+        let mut app = LocalWebApp::state(None, Lang::English, None);
+        for (phase, expected) in [
+            (DaemonPhase::Restoring, DaemonState::Starting),
+            (DaemonPhase::Serving, DaemonState::Running),
+            (DaemonPhase::Stopping, DaemonState::Stopping),
+            (DaemonPhase::Stopped, DaemonState::Stopped),
+        ] {
+            app.daemon = DaemonState::Running;
+            let mut status = test_status(false);
+            status.phase = Some(phase);
+            app.handle_response(Action::RefreshStatus, Ok(Response::Status(status)));
+            assert_eq!(app.daemon, expected, "phase {phase:?}");
+        }
+        // An explicit stop in flight outranks a serving probe.
+        app.daemon = DaemonState::Stopping;
+        let mut status = test_status(true);
+        status.phase = Some(DaemonPhase::Serving);
+        app.handle_response(Action::RefreshStatus, Ok(Response::Status(status)));
+        assert_eq!(app.daemon, DaemonState::Stopping);
     }
 
     #[test]
@@ -5108,6 +5154,7 @@ mod tests {
             Ok(Response::Status(Status {
                 daemon_running: true,
                 ready: false,
+                phase: None,
                 gateway_running: false,
                 gateway_bind_address: None,
                 gateway_https_port: None,
@@ -5126,6 +5173,7 @@ mod tests {
             Ok(Response::Status(Status {
                 daemon_running: true,
                 ready: true,
+                phase: None,
                 gateway_running: false,
                 gateway_bind_address: None,
                 gateway_https_port: None,
@@ -5238,6 +5286,7 @@ mod tests {
             Ok(Response::Status(Status {
                 daemon_running: true,
                 ready: true,
+                phase: None,
                 gateway_running: false,
                 gateway_bind_address: None,
                 gateway_https_port: None,

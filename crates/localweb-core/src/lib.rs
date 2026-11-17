@@ -1629,6 +1629,24 @@ impl ShellIntegrationStatus {
     }
 }
 
+/// Daemon lifecycle phase reported by `Status`.
+///
+/// Older daemons omit the field; clients fall back to `ready` and treat the
+/// daemon as starting whenever it has not finished restoration.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[repr(u8)]
+#[serde(rename_all = "snake_case")]
+pub enum DaemonPhase {
+    /// Startup restoration is still running; mutations wait.
+    Restoring,
+    /// Restoration finished and mutations are accepted.
+    Serving,
+    /// A shutdown request is finishing services.
+    Stopping,
+    /// Shutdown finished; the daemon is about to exit.
+    Stopped,
+}
+
 /// Daemon and gateway health counters.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Status {
@@ -1639,6 +1657,11 @@ pub struct Status {
     /// Older daemons omit this field; clients treat an absent value as not ready.
     #[serde(default)]
     pub ready: bool,
+    /// Lifecycle phase observed by the daemon.
+    ///
+    /// Older daemons omit this field; clients fall back to `ready`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub phase: Option<DaemonPhase>,
     /// Whether the HTTPS gateway unit is active.
     pub gateway_running: bool,
     /// Dedicated IPv4 loopback address selected for the gateway.
@@ -1751,6 +1774,29 @@ async fn read_response(socket: impl tokio::io::AsyncRead + Unpin) -> Result<Resp
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn status_phase_is_optional_and_serialized_by_name() {
+        let base = serde_json::json!({
+            "daemon_running": true,
+            "ready": false,
+            "gateway_running": false,
+            "project_count": 0,
+            "active_projects": 0,
+        });
+        let legacy: Status = serde_json::from_value(base.clone()).unwrap();
+        assert_eq!(legacy.phase, None);
+        let mut with_phase = base;
+        with_phase["phase"] = serde_json::json!("restoring");
+        let status: Status = serde_json::from_value(with_phase).unwrap();
+        assert_eq!(status.phase, Some(DaemonPhase::Restoring));
+        let serialized = serde_json::to_value(Status {
+            phase: None,
+            ..status
+        })
+        .unwrap();
+        assert!(serialized.get("phase").is_none());
+    }
 
     #[test]
     fn configured_environment_fixture() {
