@@ -1,21 +1,21 @@
 <p align="center">
-  <img src="assets/brand/localweb-logo.png" alt="LocalWeb" width="420">
+  <img src="assets/brand/localweb-logo.png" alt="Local Web" width="420">
 </p>
 
-# LocalWeb
+# Local Web
 
-LocalWeb is a **native local development environment for PHP applications**.
+Local Web is a **native local development environment for PHP applications**.
 It runs directly on your computer and starts the services a project needs:
 PHP-FPM, nginx or Apache, MariaDB, MySQL, PostgreSQL or SQLite, Redis,
 Mailpit, background workers and scheduled tasks. Each project gets stable
 local ports and its own HTTPS address, such as `https://my-project.test`.
 
 It does not use Docker or a virtual machine. Your application stays in the
-folder where you already develop it. LocalWeb does not copy, scaffold or
+folder where you already develop it. Local Web does not copy, scaffold or
 rewrite it. Configuration, databases, certificates, logs and snapshots live
 in your user data directory instead.
 
-LocalWeb is **UI first**: setup, project management, certificates, database
+Local Web is **UI first**: setup, project management, certificates, database
 management and shell integration are available in the desktop app. The
 `localweb` command exposes the same operations for terminals, scripts and
 IDEs, and the MCP server exposes them to AI assistants. The terminal is an
@@ -31,22 +31,22 @@ can use.
 ## The words used in this README
 
 - **Project** — one registered source folder plus the PHP version, web server
-  and services LocalWeb starts for it. Adding a project does not move or
+  and services Local Web starts for it. Adding a project does not move or
   modify its files.
 - **Runtime** — the PHP version and supporting tools (Composer, Node.js,
   npm, database clients) used by a project. The Ubuntu and Arch packages
   bundle them; macOS and Windows use native installations described below.
 - **Local domain** — a hostname such as `my-project.test` or
-  `my-project.dev` that LocalWeb maps to your machine. Its HTTPS certificate
-  is issued by the LocalWeb development CA.
+  `my-project.dev` that Local Web maps to your machine. Its HTTPS certificate
+  is issued by the Local Web development CA.
 - **Daemon** — the background process that owns projects and services. The
   desktop app, the `localweb` command and `localweb-mcp` all talk to the same
   daemon, so they see the same state and apply the same checks.
 - **Shim** — a small `php`, `composer`, `node`, `npm` or `npx` entry that
-  asks LocalWeb which project contains the current folder. Shims make a
+  asks Local Web which project contains the current folder. Shims make a
   normal terminal use the project's versions instead of the system ones.
 - **Shell integration** — the shims plus the single managed `PATH` block that
-  LocalWeb writes to your shell startup file or user `PATH`. `localweb setup`
+  Local Web writes to your shell startup file or user `PATH`. `localweb setup`
   installs it automatically.
 
 ### Reading the examples
@@ -87,7 +87,7 @@ On macOS, open the `.pkg`. On Windows, extract the `.zip` and run
 | macOS 12+ arm64/x86_64 | `.pkg` (universal) | launchd agents and system keychain trust for the development CA |
 | Windows 10/11 x86_64 | `.zip` (portable) | Named pipes, scheduled task and user certificate store |
 
-Ubuntu and Arch packages include LocalWeb's private web stack. The macOS
+Ubuntu and Arch packages include Local Web's private web stack. The macOS
 installer and Windows ZIP contain the application binaries; install the
 native tools separately through Homebrew or Scoop/Chocolatey. Check
 `localweb doctor` before starting a project. A normal desktop session with the
@@ -95,7 +95,7 @@ platform service manager (systemd, launchd or Task Scheduler) is required.
 
 ## First run: from install to a working site
 
-### 1. Set up LocalWeb
+### 1. Set up Local Web
 
 Open the desktop app and choose **Set up LocalWeb**, then **Trust
 certificate**. The same workflow from a terminal is:
@@ -138,10 +138,10 @@ In the desktop app choose **Add project**, select an existing application
 folder, check the detected preset and document root, choose the PHP version,
 web server and services, then confirm with **Add project**.
 
-The folder must already contain the application: LocalWeb does not download
+The folder must already contain the application: Local Web does not download
 framework code or create a new application for you. If the folder is empty,
 create the application first with Composer or your framework's installer.
-The source files stay where they are; LocalWeb stores only its own
+The source files stay where they are; Local Web stores only its own
 configuration under the user data directory.
 
 From a terminal the equivalent is:
@@ -156,22 +156,22 @@ localweb project add ~/Code/my-project --php 8.4 --web nginx \
 Open **Details → Show connection settings** in the desktop app and copy the
 database, Redis and email values into the application's own configuration
 (`.env`, `wp-config.php`, and so on). **Copy as .env** copies the same values.
-LocalWeb does not edit your application's configuration file.
+Local Web does not edit your application's configuration file.
 
-Set the application's base URL to the LocalWeb HTTPS address shown in
+Set the application's base URL to the Local Web HTTPS address shown in
 **Details**, for example `https://my-project.test`. From the CLI:
 
 ```bash
 localweb env my-project --format dotenv
 ```
 
-LocalWeb leaves source files and existing databases in place; it does not
+Local Web leaves source files and existing databases in place; it does not
 import data from another development stack. The Ubuntu and Arch packages
 bundle `phpredis` in every PHP runtime, so Laravel's default
 `REDIS_CLIENT=phpredis` works there. On macOS and Windows, enable the PHP
 `redis` extension provided with your PHP installation, or use
 `predis/predis`. Copy `REDIS_HOST` and `REDIS_PORT` from
-**Show connection settings** into `.env`; LocalWeb passes the same values to
+**Show connection settings** into `.env`; Local Web passes the same values to
 CLI commands and workers.
 
 ### 4. Start and open
@@ -185,7 +185,7 @@ localweb project start my-project
 Start prints the direct URL (`http://127.0.0.1:<web port>`). **Open** in the
 desktop app uses the HTTPS local domain when the gateway is ready and the
 direct URL otherwise. Stopping a project stops its services but keeps the
-project and its data. Removing a project deletes LocalWeb's configuration for
+project and its data. Removing a project deletes Local Web's configuration for
 it, not the source folder or the database.
 
 ## Use the project's tools in a terminal
@@ -214,7 +214,7 @@ has PHP 8.5, `php -v` inside the project reports **8.4**. The same applies to
 
 ### Why it works
 
-`localweb setup` installs five shims in the LocalWeb data directory
+`localweb setup` installs five shims in the Local Web data directory
 (`~/.local/share/localweb/bin` on Ubuntu, Arch/Omarchy and macOS,
 `%LOCALAPPDATA%\LocalWeb\data\bin` on Windows). It then publishes that
 directory on your login `PATH`:
@@ -273,8 +273,8 @@ localweb integration remove
 used by the desktop card.
 
 On Windows, a PHP installation listed in the **machine-wide** `PATH` takes
-precedence over the per-user LocalWeb entry, so remove it from that list if
-you want the LocalWeb shims to win.
+precedence over the per-user Local Web entry, so remove it from that list if
+you want the Local Web shims to win.
 
 ### If you do not want shell integration
 
@@ -329,12 +329,12 @@ operations that currently remain terminal-only.
 | Repair setup | **Settings → Repair setup** | `localweb setup` |
 | Shell integration status/install/remove | **Settings → Shell integration** | `localweb integration ...` |
 | AI assistant configuration | **Settings → AI assistants** | `localweb-mcp` |
-| Stop LocalWeb | **Stop LocalWeb** | `localweb shutdown` |
-| Start a project when LocalWeb starts | project form checkbox | `localweb project update <name> --autostart` |
-| Start LocalWeb at login | — | `localweb autostart enable\|disable` |
+| Stop Local Web | **Stop LocalWeb** | `localweb shutdown` |
+| Start a project when Local Web starts | project form checkbox | `localweb project update <name> --autostart` |
+| Start Local Web at login | — | `localweb autostart enable\|disable` |
 | Diagnostics | — | `localweb doctor` |
 
-Closing the desktop window keeps LocalWeb running in the system tray on
+Closing the desktop window keeps Local Web running in the system tray on
 Linux, macOS and Windows. Clicking the tray icon shows **Open** and **Quit
 desktop app**: **Open** restores the window, while **Quit desktop app**
 closes the desktop app only. The daemon and running projects keep working, so
@@ -366,7 +366,7 @@ CLI:
 
 The row actions are always visible, including in the narrow stacked layout.
 **Edit** opens the full settings form; **Remove** asks for confirmation.
-Deleting an active project stops it first, then removes its LocalWeb
+Deleting an active project stops it first, then removes its Local Web
 configuration, local domain and project-owned runtime artifacts. The source
 folder and database data are always retained.
 
@@ -389,7 +389,7 @@ the current worker configuration is kept.
 
 ## Runtimes and local domains
 
-| Tool | What LocalWeb provides |
+| Tool | What Local Web provides |
 | --- | --- |
 | **PHP 8.0–8.5** | Per-project CLI and PHP-FPM selection. PHP 8.0 and 8.1 are end-of-life compatibility versions and receive no upstream security fixes; 8.2 is in security-only support until 31 Dec 2026. Use a supported branch for current work. The desktop indicates which versions are included. PHP 8.6 will be added after its stable release. Bundled Linux runtimes include the `redis` (phpredis) extension, and Laravel projects may use `predis/predis` instead. |
 | **nginx** | Per-project web configuration for a LEMP stack. |
@@ -397,7 +397,7 @@ the current worker configuration is kept.
 | **MariaDB** | Shared local server with a database and credentials for each project; the reference payload uses MariaDB 11.8 LTS. |
 | **MySQL** | Shared local server with a database and credentials for each project; the reference payload uses MySQL 8.4 LTS. |
 | **PostgreSQL** | Private local cluster with a database and login for each project. |
-| **SQLite** | A LocalWeb-owned database file for each project, accessed through PHP. |
+| **SQLite** | A Local Web-owned database file for each project, accessed through PHP. |
 | **Redis** | A separate local cache process for each project. |
 | **Composer 2** | Runs with the project's selected PHP. |
 | **Node.js 24, npm and npx** | Bundled LTS build tools. Node.js 22 and 20 can also be selected when matching system installations are available; Node.js 20 is EOL. |
@@ -407,12 +407,12 @@ the current worker configuration is kept.
 
 Every project gets a fixed loopback HTTP port (18000–18999) and, for network
 databases, a fixed loopback database port (19000–19999) forwarded to the
-shared engine. Pin them with `--web-port` and `--db-port`, or let LocalWeb
+shared engine. Pin them with `--web-port` and `--db-port`, or let Local Web
 allocate them from those ranges. `localweb project info <name>` shows both
 endpoints, and the environment values expose the database proxy port as
 `DB_PORT`.
 
-The HTTPS gateway runs locally as part of LocalWeb and is managed by the
+The HTTPS gateway runs locally as part of Local Web and is managed by the
 daemon. It prefers port 443 on its own loopback address; when that is not
 available it uses a high port and shows the resulting URL, so it never stops
 or rewrites an unrelated service. `localweb status` shows the addresses and
@@ -422,7 +422,7 @@ during the first installation.
 
 Local domains are exact project entries in `/etc/hosts`, with `.dev` as the
 default suffix. **Settings → Sync local domains** repairs them from the
-desktop app; `localweb hosts sync` is the CLI equivalent. LocalWeb only
+desktop app; `localweb hosts sync` is the CLI equivalent. Local Web only
 changes the entries it owns.
 
 The Linux build pipeline assembles all six PHP CLI/FPM pairs from the pinned
@@ -524,7 +524,7 @@ localweb shutdown
 ## AI assistants (MCP)
 
 The package installs `localweb-mcp`, a Model Context Protocol server that
-exposes the LocalWeb daemon over stdio. Point any MCP-capable client at the
+exposes the Local Web daemon over stdio. Point any MCP-capable client at the
 binary to let an assistant create a project, start it, run `composer`,
 framework commands or tests inside the project runtime, read logs and open
 the environment values. The tool set covers status and diagnostics, daemon
@@ -550,7 +550,7 @@ folder.
 ```
 
 The assistant connects to the same user daemon as the desktop app; start
-LocalWeb once (`localweb start`) or use the `localweb_daemon_start` tool.
+Local Web once (`localweb start`) or use the `localweb_daemon_start` tool.
 Privileged steps (CA installation, `/etc/hosts` changes) still require the
 normal polkit authentication.
 
@@ -561,7 +561,7 @@ domain and project-file problems. Common checks:
 
 - **`php -v` shows the system version inside a project.** Open
   **Settings → Shell integration** and check that the status is **Active**,
-  then open a new terminal. `which php` must point to the LocalWeb shim
+  then open a new terminal. `which php` must point to the Local Web shim
   folder shown in the card. On Windows, remove any machine-wide PHP entry
   that appears before the user `PATH`.
 - **The daemon is not reachable.** Start it from the desktop app or with
@@ -597,14 +597,14 @@ and daemon regressions under Wine too. These checks do not replace native
 web-stack acceptance on macOS and Windows. Tagged versions and the rolling
 pre-release publish the same files as public release assets.
 
-## Remove LocalWeb
+## Remove Local Web
 
 ```bash
 sudo apt remove localweb     # Ubuntu
 sudo pacman -R localweb      # Arch / Omarchy
 ```
 
-Package removal stops LocalWeb's services and removes its system integration,
+Package removal stops Local Web's services and removes its system integration,
 binaries, logs and host mappings. **Per-user data is preserved:** projects,
 databases, settings, generated certificates and the private CA keys are never
 deleted by `apt remove` or `pacman -R`, and upgrades keep them as well.
@@ -617,7 +617,7 @@ localweb integration remove
 ```
 
 This deletes the shims and the managed block from your shell startup file (or
-the user `PATH` entry on Windows). To erase this account's LocalWeb data
+the user `PATH` entry on Windows). To erase this account's Local Web data
 explicitly:
 
 ```bash
@@ -627,7 +627,7 @@ localweb data purge             # requires typing "purge" to confirm
 ```
 
 `localweb data purge` only removes directories owned by the calling account
-and refuses symlinked paths. Source project folders outside LocalWeb data
+and refuses symlinked paths. Source project folders outside Local Web data
 directories are never touched.
 
 ## Build
