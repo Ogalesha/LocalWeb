@@ -48,13 +48,21 @@ if [ -z "$wineserver_bin" ] && [ -x /usr/lib/wine/wineserver64 ]; then
     wineserver_bin=/usr/lib/wine/wineserver64
 fi
 cleanup() {
+    status=$?
     [ -n "$daemon_pid" ] && kill "$daemon_pid" 2>/dev/null || true
     if [ -n "$wineserver_bin" ]; then
         "$wineserver_bin" -k 2>/dev/null || true
         timeout 20 "$wineserver_bin" -w 2>/dev/null || true
     fi
-    rm -rf "$wineprefix" "$runtime_dir"
-    rm -f "$test_manifest"
+    # Wine can still recreate files in the prefix while it shuts down, so retry
+    # the removal instead of failing the smoke test on a transient error.
+    for _ in 1 2 3 4 5; do
+        rm -rf "$wineprefix" 2>/dev/null && break
+        sleep 1
+    done
+    rm -rf "$wineprefix" "$runtime_dir" 2>/dev/null || true
+    rm -f "$test_manifest" 2>/dev/null || true
+    exit "$status"
 }
 trap cleanup EXIT
 
