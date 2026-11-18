@@ -2252,7 +2252,6 @@ dependencies = [
 name = "localweb-gui"
 version = "0.1.6"
 dependencies = [
- "anyhow",
  "eframe",
  "image",
  "localweb-core",
